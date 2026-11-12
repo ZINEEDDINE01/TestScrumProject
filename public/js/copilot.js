@@ -2,7 +2,7 @@
 import { h, raw, api, actions, forms, field, modal, closeModal, refresh, toast, decisionModal, fmtDt } from './core.js';
 
 let list = []; let idx = 0; let host = null; let history = null;
-const BADGE = { haute: ['🔴', 'Priorité haute'], moyenne: ['🟡', 'Priorité moyenne'], optim: ['🟢', 'Optimisation'] };
+const BADGE = { haute: ['🔴', 'Priorité haute'], moyenne: ['🟡', 'Priorité moyenne'], optim: ['●', 'Optimisation'] };
 
 export async function mountCopilot(el) {
   host = el; host.innerHTML = '<section class="copilot"><p class="muted">Analyse des données en cours…</p></section>';
@@ -13,7 +13,7 @@ export async function mountCopilot(el) {
 function draw() {
   const d = list[idx];
   host.innerHTML = String(h`<section class="copilot" aria-label="Copilote décisionnel">
-  <div class="cp-h"><div><span class="cp-tag">🤖 Copilote Wilaya</span><h3>Aide à la décision</h3><p class="cp-sub">Analyse automatique par règles et seuils explicites — aucune décision n'est exécutée sans votre validation.</p></div>${list.length ? h`<span class="cp-count" aria-live="polite">Recommandation ${idx + 1} sur ${list.length}</span>` : ''}</div>
+  <div class="cp-h"><div><span class="cp-tag">👑 Copilote Wilaya</span><h3>Aide à la décision</h3><p class="cp-sub">Analyse automatique par règles et seuils explicites — aucune décision n'est exécutée sans votre validation.</p></div>${list.length ? h`<span class="cp-count" aria-live="polite">Recommandation ${idx + 1} sur ${list.length}</span>` : ''}</div>
   ${d ? h`<article class="cp-card">
     <div class="cp-meta"><span class="cp-prio ${d.priorite_info.badge}"><span aria-hidden="true">${BADGE[d.priorite_info.badge][0]}</span> ${d.priorite_info.label}</span><span class="cp-ent">Entité : ${d.entite}</span></div>
     <h4>${d.titre}</h4>

@@ -34,7 +34,7 @@ actions.pwd = () => import('./core.js').then(({ modal, closeModal }) => {
 
 function shell() {
   const u = state.user; const items = NAV[u.role];
-  app.innerHTML = String(h`<div class="layout"><aside class="side"><div class="brand"><span aria-hidden="true">🇲🇦</span><div><b>SIGRH</b><small>Wilaya Dakhla-Oued Ed-Dahab</small></div></div>
+  app.innerHTML = String(h`<div class="layout"><aside class="side"><div class="brand"><span class="logo" aria-hidden="true">MA</span><div><b>SIGRH</b><small>Wilaya Dakhla-Oued Ed-Dahab</small></div></div>
   <nav aria-label="Navigation principale">${items.map(([k, l, i]) => h`<a href="#/${k}" data-nav="${k}"><span aria-hidden="true">${i}</span> ${l}</a>`)}</nav>
   <div class="me"><div><b>${u.nom_affichage}</b><small>${ROLE_LABEL[u.role]}</small></div><div class="row"><a class="btn mini ghost" href="#/notifications">🔔${u.unread ? h` <span id="badge-n" class="count">${u.unread}</span>` : ''}</a><button class="mini ghost" data-act="pwd">Mot de passe</button><button class="mini ghost" data-act="logout">Quitter</button></div></div></aside>
   <main class="main" id="view" tabindex="-1"></main></div>`);

@@ -1,15 +1,18 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { open } = require('./db');
+const { open, dropSchema } = require('./db');
 const { seed } = require('./seed');
 const { createApp } = require('./app');
 const U = require('./util');
 
-const db = open(':memory:'); seed(db);
-const server = createApp(db); let base;
-test.before(() => new Promise((r) => server.listen(0, () => { base = 'http://127.0.0.1:' + server.address().port; r(); })));
-test.after(() => server.close());
+// Chaque exécution utilise un schéma PostgreSQL jetable (DATABASE_URL requis).
+let db, server, base;
+test.before(async () => {
+  db = await open({ schema: 't_' + Math.random().toString(36).slice(2, 10) }); await seed(db); server = createApp(db);
+  await new Promise((r) => server.listen(0, () => { base = 'http://127.0.0.1:' + server.address().port; r(); }));
+});
+test.after(async () => { server.close(); await dropSchema(db); });
 
 async function as(user) {
   const r = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: 'demo1234' }) });
@@ -90,11 +93,17 @@ test('copilote : file priorisée, accès réservé, exécution après validation
   assert.ok((await w('/copilot/history')).body.length >= 2);
 });
 test('affectation temporaire : retour automatique à l\'échéance', async () => {
-  const cp = require('./copilot'); const row = db.prepare("SELECT * FROM affectations_temporaires WHERE statut='en_cours'").get(); assert.ok(row);
-  assert.notEqual(db.prepare('SELECT service_id s FROM employees WHERE id=?').get(row.employee_id).s, row.service_origine);
-  cp.revertExpired(db, U.addDays(row.date_fin, 1)); assert.equal(db.prepare('SELECT service_id s FROM employees WHERE id=?').get(row.employee_id).s, row.service_origine);
+  const cp = require('./copilot'); const row = await db.prepare("SELECT * FROM affectations_temporaires WHERE statut='en_cours'").get(); assert.ok(row);
+  assert.notEqual((await db.prepare('SELECT service_id s FROM employees WHERE id=?').get(row.employee_id)).s, row.service_origine);
+  await cp.revertExpired(db, U.addDays(row.date_fin, 1)); assert.equal((await db.prepare('SELECT service_id s FROM employees WHERE id=?').get(row.employee_id)).s, row.service_origine);
 });
 test('dashboard : formules du cahier des charges (encadrement, avancement, formation)', async () => {
   const d = (await (await as('drh'))('/dashboard')).body; assert.ok(d.effectifs.encadrement_pct > 0); assert.ok(d.assiduite.par_entite.length > 0);
   assert.equal(d.carriere.taux_realisation, Math.round((d.carriere.valides / d.carriere.eligibles) * 1000) / 10); assert.ok(d.formules.some((f) => f.id === 'encad'));
+});
+
+test('chef de service : périmètre limité à son équipe', async () => {
+  const c = await as('chef'); const team = (await c('/employees')).body; assert.equal((await c('/employees')).status, 200); assert.ok(team.total > 0 && team.total < 60);
+  for (const p of ['/leaves', '/absences', '/promotions', '/alerts']) assert.equal((await c(p)).status, 200, p);
+  const other = (await (await as('drh'))('/employees?limit=1&service_id=1')).body.items[0]; assert.equal((await c('/employees/' + other.id)).status, 403);
 });

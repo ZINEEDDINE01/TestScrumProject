@@ -3,10 +3,15 @@
   "version": "0.1.0",
   "description": "SIGRH & Tableau de bord exécutif - Wilaya de la Région Dakhla-Oued Ed-Dahab (prototype)",
   "type": "commonjs",
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node --no-warnings server/index.js",
     "seed": "node --no-warnings server/seed.js --reset",
     "test": "node --no-warnings --test server/app.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
   }
 }
