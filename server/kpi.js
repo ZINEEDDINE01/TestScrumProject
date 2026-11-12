@@ -28,13 +28,13 @@ const FORMULES = [
   { id: 'retention12', nom: 'Taux de rétention sur 1 an', formule: '(Employés restés 1 an / Total des embauches pendant la période) × 100', note: "Cohorte des embauches de la période [−24 mois ; −12 mois], vérifiée un an après leur prise de service." },
 ];
 
-function dashboard(db, today = U.today()) {
+async function dashboard(db, today = U.today()) {
   const Y = Number(today.slice(0, 4)); const yStart = `${Y}-01-01`; const mStart = today.slice(0, 7) + '-01';
-  const all = db.prepare('SELECT e.*, s.nom service, s.division, s.localisation, s.type_entite FROM employees e LEFT JOIN services s ON s.id=e.service_id').all();
+  const all = await db.prepare('SELECT e.*, s.nom service, s.division, s.localisation, s.type_entite FROM employees e LEFT JOIN services s ON s.id=e.service_id').all();
   const act = all.filter((e) => e.statut === 'actif');
   const eff = (d) => count(all, (e) => e.date_recrutement <= d && (!e.date_depart || e.date_depart > d));
-  const leaves = db.prepare("SELECT * FROM leaves WHERE statut='valide'").all();
-  const abs = db.prepare('SELECT * FROM absences').all();
+  const leaves = await db.prepare("SELECT * FROM leaves WHERE statut='valide'").all();
+  const abs = await db.prepare('SELECT * FROM absences').all();
   const byId = new Map(all.map((e) => [e.id, e]));
   const age = (e, at = today) => U.yearsBetween(e.date_naissance, at);
 
@@ -107,7 +107,7 @@ function dashboard(db, today = U.today()) {
   };
 
   // ---- Recrutement
-  const rec = db.prepare('SELECT * FROM recruitments').all();
+  const rec = await db.prepare('SELECT * FROM recruitments').all();
   const recY = rec.filter((r) => r.date_candidature >= yStart || (r.date_acceptation && r.date_acceptation >= yStart));
   const pourvus = rec.filter((r) => r.statut === 'acceptee' && r.date_acceptation >= yStart && r.date_acceptation <= today);
   const offres = rec.filter((r) => r.date_offre && r.date_offre >= yStart && r.date_offre <= today);
@@ -122,7 +122,7 @@ function dashboard(db, today = U.today()) {
   };
 
   // ---- Carrière
-  const pr = db.prepare('SELECT * FROM promotions WHERE annee=?').all(Y);
+  const pr = await db.prepare('SELECT * FROM promotions WHERE annee=?').all(Y);
   const val = pr.filter((p) => p.statut === 'valide');
   const carriere = {
     eligibles: pr.length, valides: val.length, rejetes: count(pr, (p) => p.statut === 'rejete'), en_attente: count(pr, (p) => p.statut === 'propose'),
@@ -133,7 +133,7 @@ function dashboard(db, today = U.today()) {
   };
 
   // ---- Formation
-  const tr = db.prepare('SELECT * FROM trainings').all(); const en = db.prepare('SELECT * FROM enrollments').all();
+  const tr = await db.prepare('SELECT * FROM trainings').all(); const en = await db.prepare('SELECT * FROM enrollments').all();
   const trY = new Map(tr.filter((t) => t.date_debut >= yStart && t.date_debut <= today).map((t) => [t.id, t]));
   const presents = en.filter((x) => x.statut === 'present' && trY.has(x.training_id));
   const actIds = new Set(act.map((e) => e.id));
@@ -153,7 +153,7 @@ function dashboard(db, today = U.today()) {
   };
 
   // ---- E-services
-  const att = db.prepare('SELECT * FROM attestations').all();
+  const att = await db.prepare('SELECT * FROM attestations').all();
   const attM = att.filter((a) => a.requested_at.slice(0, 10) >= mStart);
   const hrs = (a) => (new Date(a.signed_at + 'Z') - new Date(a.requested_at + 'Z')) / 3600e3;
   const NOMS_ATT = { travail: 'Attestation de travail', salaire: 'Attestation de salaire', mission: 'Ordre de mission', conge: 'Titre de congé' };

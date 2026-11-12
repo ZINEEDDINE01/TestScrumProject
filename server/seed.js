@@ -1,7 +1,6 @@
 'use strict';
 // Jeu de données fictif et déterministe (aucune donnée personnelle réelle).
-const fs = require('node:fs');
-const { open, hashPassword, tx, DB_PATH } = require('./db');
+const { open, reset, hashPassword, tx } = require('./db');
 const U = require('./util');
 const R = require('./rules');
 
@@ -29,7 +28,7 @@ const DIVISIONS = [
 ];
 const TARGET = 485;
 
-function seed(db, { today = U.today() } = {}) {
+async function seed(db, { today = U.today() } = {}) {
   const rnd = prng(20261112);
   const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
   const pick = (a) => a[Math.floor(rnd() * a.length)];
@@ -41,14 +40,14 @@ function seed(db, { today = U.today() } = {}) {
   const nextWork = (d) => { while (!U.isWorkday(d)) d = U.addDays(d, 1); return d; };
   const endAfter = (start, wd) => { let d = start, n = 1; while (n < wd) { d = U.addDays(d, 1); if (U.isWorkday(d)) n++; } return d; };
 
-  tx(db, () => {
+  await tx(db, async () => {
     // --- Règles paramétrables
-    db.prepare('INSERT INTO regles_echelon VALUES (?,?,?)').run('rapide', 24, 30);
-    db.prepare('INSERT INTO regles_echelon VALUES (?,?,?)').run('moyen', 30, 50);
-    db.prepare('INSERT INTO regles_echelon VALUES (?,?,?)').run('lent', 36, 20);
+    await db.prepare('INSERT INTO regles_echelon VALUES (?,?,?)').run('rapide', 24, 30);
+    await db.prepare('INSERT INTO regles_echelon VALUES (?,?,?)').run('moyen', 30, 50);
+    await db.prepare('INSERT INTO regles_echelon VALUES (?,?,?)').run('lent', 36, 20);
     const rg = db.prepare('INSERT INTO regles_grade (grade_from,grade_to,echelon_min,anciennete_min_ans,mode,quota_pct) VALUES (?,?,?,?,?,?)');
-    rg.run('3ème grade', '2ème grade', 4, 4, 'choix', 30); rg.run('2ème grade', '1er grade', 5, 5, 'choix', 30); rg.run('1er grade', 'Grade principal', 6, 6, 'choix', 25);
-    rg.run('3ème grade', '2ème grade', 3, 3, 'examen', 100);
+    await rg.run('3ème grade', '2ème grade', 4, 4, 'choix', 30); await rg.run('2ème grade', '1er grade', 5, 5, 'choix', 30); await rg.run('1er grade', 'Grade principal', 6, 6, 'choix', 25);
+    await rg.run('3ème grade', '2ème grade', 3, 3, 'examen', 100);
 
     // --- Services
     const insS = db.prepare('INSERT INTO services (nom,division,localisation,type_entite) VALUES (?,?,?,?)');
@@ -56,20 +55,20 @@ function seed(db, { today = U.today() } = {}) {
     let wsum = 0; DIVISIONS.forEach((d) => d[3].forEach((s) => (wsum += s[1])));
     let alloc = 0;
     for (const [div, loc, type, list] of DIVISIONS) for (const [nom, w] of list) {
-      const id = Number(insS.run(nom, div, loc, type === 'service' ? 'service' : (nom.startsWith('Caïdat') ? 'caidat' : (nom.startsWith('Annexe') ? 'annexe' : 'service'))).lastInsertRowid);
+      const id = Number((await insS.run(nom, div, loc, type === 'service' ? 'service' : (nom.startsWith('Caïdat') ? 'caidat' : (nom.startsWith('Annexe') ? 'annexe' : 'service')))).lastInsertRowid);
       const n = Math.round((w * TARGET) / wsum); services.push({ id, div, loc, nom, n }); alloc += n;
     }
     services[services.length - 1].n += TARGET - alloc;
 
     // --- Formateurs
     const insF = db.prepare('INSERT INTO formateurs (nom,organisme,specialite,email) VALUES (?,?,?,?)');
-    [['Pr. Karim Bensouda', 'Université Ibn Zohr', 'Droit administratif'], ['Mme Laila Ouahbi', 'ENA Rabat', 'Marchés publics'], ['M. Reda Skalli', 'Direction des Systèmes d\'Information (MI)', 'Systèmes d\'information'], ['Dr Nawal Berhili', 'Institut des Hautes Études de Gestion', 'Management territorial'], ['M. Tarik Amrani', 'Cabinet Compétences Sud', 'Gestion des ressources humaines'], ['Mme Sanaa Idrissi', 'Institut de Langues Dakhla', 'Communication administrative']].forEach((f) => insF.run(f[0], f[1], f[2], null));
+    for (const f of [['Pr. Karim Bensouda', 'Université Ibn Zohr', 'Droit administratif'], ['Mme Laila Ouahbi', 'ENA Rabat', 'Marchés publics'], ['M. Reda Skalli', 'Direction des Systèmes d\'Information (MI)', 'Systèmes d\'information'], ['Dr Nawal Berhili', 'Institut des Hautes Études de Gestion', 'Management territorial'], ['M. Tarik Amrani', 'Cabinet Compétences Sud', 'Gestion des ressources humaines'], ['Mme Sanaa Idrissi', 'Institut de Langues Dakhla', 'Communication administrative']]) await insF.run(f[0], f[1], f[2], null);
 
     // --- Fonctionnaires
     const insE = db.prepare(`INSERT INTO employees (ppr,cin,nom,prenom,sexe,date_naissance,date_recrutement,email,telephone,situation_familiale,nb_enfants,diplome,corps,echelle,echelon,grade,rythme,poste,service_id,cadre_sup,statut,date_depart,motif_depart,solde_conges,date_dernier_echelon,date_dernier_grade,date_prise_service)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     const used = new Set(); let seq = 0;
-    const makeEmp = (svc, { statut = 'actif', hireWindow = null, depart = null } = {}) => {
+    const makeEmp = async (svc, { statut = 'actif', hireWindow = null, depart = null } = {}) => {
       const sexe = rnd() < 0.38 ? 'F' : 'H';
       let prenom, nom, key;
       do { prenom = pick(sexe === 'F' ? PRENOMS_F : PRENOMS_H); nom = pick(NOMS); key = prenom + nom; } while (used.has(key) && used.size < 600 && rnd() < 0.9);
@@ -93,7 +92,7 @@ function seed(db, { today = U.today() } = {}) {
       const ppr = String(1000000 + seq * 7 + ri(0, 5));
       const email = `${prenom}.${nom}`.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z.]/g, '') + seq + '@wilaya-dakhla.example';
       const sf = birth < '1990-01-01' ? wpick([['Marié(e)', 75], ['Célibataire', 12], ['Divorcé(e)', 8], ['Veuf(ve)', 5]]) : wpick([['Marié(e)', 45], ['Célibataire', 52], ['Divorcé(e)', 3]]);
-      const id = Number(insE.run(ppr, 'EH' + String(100000 + ri(0, 899999)), nom, prenom, sexe, birth, hire, email, '06' + String(ri(10000000, 99999999)), sf, sf === 'Marié(e)' ? ri(0, 4) : 0, R.CORPS[corps].diplome, corps, R.CORPS[corps].echelle, echelon, R.GRADES[gi], wpick([['rapide', 25], ['moyen', 50], ['lent', 25]]), corps === 'Adjoint administratif' ? 'Adjoint administratif' : `${corps} - ${svc.nom}`, svc.id, corps === 'Administrateur' || corps === 'Ingénieur' ? 1 : 0, statut, depart, depart ? pick(['Retraite', 'Démission', 'Mutation', 'Détachement', 'Décès']) : null, 22, dernierEch, dg, hire).lastInsertRowid);
+      const id = Number((await insE.run(ppr, 'EH' + String(100000 + ri(0, 899999)), nom, prenom, sexe, birth, hire, email, '06' + String(ri(10000000, 99999999)), sf, sf === 'Marié(e)' ? ri(0, 4) : 0, R.CORPS[corps].diplome, corps, R.CORPS[corps].echelle, echelon, R.GRADES[gi], wpick([['rapide', 25], ['moyen', 50], ['lent', 25]]), corps === 'Adjoint administratif' ? 'Adjoint administratif' : `${corps} - ${svc.nom}`, svc.id, corps === 'Administrateur' || corps === 'Ingénieur' ? 1 : 0, statut, depart, depart ? pick(['Retraite', 'Démission', 'Mutation', 'Détachement', 'Décès']) : null, 22, dernierEch, dg, hire)).lastInsertRowid);
       return id;
     };
     const hireNew = [];
@@ -101,49 +100,49 @@ function seed(db, { today = U.today() } = {}) {
     const recent = [];
     for (const s of services) for (let i = 0; i < s.n; i++) recent.push(s);
     const shuffled = recent.map((s) => [rnd(), s]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
-    shuffled.forEach((s, i) => {
+    for (const [i, s] of shuffled.entries()) {
       let w = null;
       if (i < 22) w = [yStart, U.addDays(today, -3)]; else if (i < 47) w = [`${Y - 1}-01-01`, `${Y - 1}-12-31`];
-      const id = makeEmp(s, { hireWindow: w }); if (w) hireNew.push(id);
-    });
+      const id = await makeEmp(s, { hireWindow: w }); if (w) hireNew.push(id);
+    }
     // départs: 15 cette année, 21 l'an dernier (fonctionnaires aujourd'hui « partis »)
     for (let i = 0; i < 36; i++) {
       const s = pick(services);
       const early = i < 3; // départs de recrues de l'an dernier (rétention à 1 an)
       const dep = early ? randDate(`${Y}-01-05`, `${Y}-02-20`) : i < 15 ? randDate(yStart, U.addDays(today, -5)) : randDate(`${Y - 1}-01-01`, `${Y - 1}-12-31`);
-      makeEmp(s, { statut: 'parti', depart: dep, hireWindow: early ? [`${Y - 1}-03-01`, `${Y - 1}-04-30`] : [`${Y - 30}-01-01`, `${Y - 3}-12-31`] });
+      await makeEmp(s, { statut: 'parti', depart: dep, hireWindow: early ? [`${Y - 1}-03-01`, `${Y - 1}-04-30`] : [`${Y - 30}-01-01`, `${Y - 3}-12-31`] });
     }
     // Chefs de service (fonctionnaire le plus ancien parmi cadres) + échelle hors échelle pour chefs de division
     const divSeen = new Set();
     for (const s of services) {
-      const c = db.prepare("SELECT id FROM employees WHERE service_id=? AND statut='actif' ORDER BY cadre_sup DESC, date_recrutement LIMIT 1").get(s.id);
+      const c = await db.prepare("SELECT id FROM employees WHERE service_id=? AND statut='actif' ORDER BY cadre_sup DESC, date_recrutement LIMIT 1").get(s.id);
       if (!c) continue;
-      db.prepare('UPDATE services SET chef_id=? WHERE id=?').run(c.id, s.id);
+      await db.prepare('UPDATE services SET chef_id=? WHERE id=?').run(c.id, s.id);
       const first = !divSeen.has(s.div); divSeen.add(s.div);
       const isWilaya = s.loc === 'Wilaya' && first;
-      db.prepare("UPDATE employees SET cadre_sup=1, poste=?, corps=CASE WHEN ?=1 THEN 'Administrateur' ELSE corps END, echelle=CASE WHEN ?=1 THEN 'HE' ELSE echelle END, grade=CASE WHEN ?=1 THEN 'Grade principal' ELSE grade END, echelon=CASE WHEN ?=1 THEN 10 ELSE echelon END WHERE id=?")
+      await db.prepare("UPDATE employees SET cadre_sup=1, poste=?, corps=CASE WHEN ?=1 THEN 'Administrateur' ELSE corps END, echelle=CASE WHEN ?=1 THEN 'HE' ELSE echelle END, grade=CASE WHEN ?=1 THEN 'Grade principal' ELSE grade END, echelon=CASE WHEN ?=1 THEN 10 ELSE echelon END WHERE id=?")
         .run(isWilaya ? `Chef de ${s.div.replace(/^Division (des |du |de l'|de la |d')?/, 'Division ')}` : `Chef de ${/^(Caïdat)/.test(s.nom) ? s.nom : 'Service ' + s.nom}`, isWilaya ? 1 : 0, isWilaya ? 1 : 0, isWilaya ? 1 : 0, isWilaya ? 1 : 0, c.id);
     }
 
     // Scénario de démonstration : Annexe 3 — plusieurs départs à la retraite proches
-    const hotSvc = db.prepare("SELECT id FROM services WHERE nom='Annexe Administrative 3'").get();
-    const hotEmps = db.prepare("SELECT e.id FROM employees e WHERE e.service_id=? AND e.statut='actif' AND e.id NOT IN (SELECT chef_id FROM services WHERE chef_id IS NOT NULL) ORDER BY e.id LIMIT 3").all(hotSvc.id);
-    hotEmps.forEach((e, i) => { const birth = U.addDays(U.addMonths(today, -63 * 12), 60 + i * 90); const hire = U.addMonths(birth, 25 * 12); db.prepare('UPDATE employees SET date_naissance=?, date_recrutement=?, date_prise_service=?, date_dernier_echelon=?, date_dernier_grade=?, corps=?, echelle=?, grade=?, echelon=10 WHERE id=?').run(birth, hire, hire, U.addMonths(today, -20), U.addMonths(hire, 120), 'Rédacteur', '9', 'Grade principal', e.id); });
+    const hotSvc = await db.prepare("SELECT id FROM services WHERE nom='Annexe Administrative 3'").get();
+    const hotEmps = await db.prepare("SELECT e.id FROM employees e WHERE e.service_id=? AND e.statut='actif' AND e.id NOT IN (SELECT chef_id FROM services WHERE chef_id IS NOT NULL) ORDER BY e.id LIMIT 3").all(hotSvc.id);
+    for (const [i, e] of hotEmps.entries()) { const birth = U.addDays(U.addMonths(today, -63 * 12), 60 + i * 90); const hire = U.addMonths(birth, 25 * 12); await db.prepare('UPDATE employees SET date_naissance=?, date_recrutement=?, date_prise_service=?, date_dernier_echelon=?, date_dernier_grade=?, corps=?, echelle=?, grade=?, echelon=10 WHERE id=?').run(birth, hire, hire, U.addMonths(today, -20), U.addMonths(hire, 120), 'Rédacteur', '9', 'Grade principal', e.id); }
 
     // --- Comptes de démonstration
     const insU = db.prepare('INSERT INTO users (username,hash,salt,role,employee_id,nom_affichage) VALUES (?,?,?,?,?,?)');
-    const mk = (u, role, emp, nom) => { const h = hashPassword('demo1234'); insU.run(u, h.hash, h.salt, role, emp, nom); };
+    const mk = async (u, role, emp, nom) => { const h = hashPassword('demo1234'); await insU.run(u, h.hash, h.salt, role, emp, nom); };
     const sid = (nom, div) => db.prepare('SELECT id, chef_id FROM services WHERE nom=? AND division=?').get(nom, div);
-    const gp = sid('Gestion du Personnel', 'Division des Ressources Humaines');
-    const ag = sid('Affaires Générales', 'Division des Affaires Intérieures');
-    mk('wali', 'wali', null, 'M. le Wali de la Région');
-    mk('drh', 'drh', gp.chef_id, 'Chef de la DRH');
-    mk('chef', 'chef', ag.chef_id, 'Chef de Service (Affaires Générales)');
-    const agent = db.prepare("SELECT id FROM employees WHERE service_id=? AND statut='actif' AND id<>? ORDER BY date_recrutement LIMIT 1").get(ag.id, ag.chef_id);
-    mk('agent', 'fonctionnaire', agent.id, 'Fonctionnaire (démo)');
+    const gp = await sid('Gestion du Personnel', 'Division des Ressources Humaines');
+    const ag = await sid('Affaires Générales', 'Division des Affaires Intérieures');
+    await mk('wali', 'wali', null, 'M. le Wali de la Région');
+    await mk('drh', 'drh', gp.chef_id, 'Chef de la DRH');
+    await mk('chef', 'chef', ag.chef_id, 'Chef de Service (Affaires Générales)');
+    const agent = await db.prepare("SELECT id FROM employees WHERE service_id=? AND statut='actif' AND id<>? ORDER BY date_recrutement LIMIT 1").get(ag.id, ag.chef_id);
+    await mk('agent', 'fonctionnaire', agent.id, 'Fonctionnaire (démo)');
 
     // --- Congés & absences
-    const actifs = db.prepare("SELECT id, service_id, date_recrutement FROM employees WHERE statut='actif'").all();
+    const actifs = await db.prepare("SELECT id, service_id, date_recrutement FROM employees WHERE statut='actif'").all();
     const insL = db.prepare('INSERT INTO leaves (employee_id,type,date_debut,date_fin,jours,motif,statut,avis_chef,created_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?,?)');
     const insA = db.prepare('INSERT INTO absences (employee_id,date_debut,date_fin,jours,type,statut_justif,justification,created_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?)');
     const used_by = {};
@@ -156,7 +155,7 @@ function seed(db, { today = U.today() } = {}) {
           const type = wpick([['annuel', 82], ['exceptionnel', 16], ['pelerinage', 2]]);
           const len = type === 'annuel' ? ri(2, 9) : type === 'exceptionnel' ? 3 : 20;
           const s = nextWork(randDate(from, me > today ? today : me)); const en = endAfter(s, len); const j = U.workdays(s, en);
-          insL.run(e.id, type, s, en, j, null, 'valide', 'favorable', dt(U.addDays(s, -ri(7, 25))), dt(U.addDays(s, -ri(2, 6))));
+          await insL.run(e.id, type, s, en, j, null, 'valide', 'favorable', dt(U.addDays(s, -ri(7, 25))), dt(U.addDays(s, -ri(2, 6))));
           if (type === 'annuel') used_by[e.id] = (used_by[e.id] || 0) + j;
         }
         const hot = e.service_id === hotSvc.id && m >= Number(today.slice(5, 7)) - 2;
@@ -166,31 +165,31 @@ function seed(db, { today = U.today() } = {}) {
           let st;
           if (recentAbs) st = rnd() < 0.4 ? 'soumise' : 'aucune';
           else st = type === 'maladie' ? wpick([['validee', 62], ['rejetee', 8], ['soumise', 5], ['aucune', 25]]) : wpick([['aucune', 55], ['validee', 20], ['rejetee', 25]]);
-          insA.run(e.id, s, en, j, type, st, st === 'aucune' ? null : (type === 'maladie' ? 'Certificat médical joint' : 'Justificatif administratif'), dt(U.addDays(en, 1)), ['validee', 'rejetee'].includes(st) ? dt(U.addDays(en, ri(2, 6))) : null);
+          await insA.run(e.id, s, en, j, type, st, st === 'aucune' ? null : (type === 'maladie' ? 'Certificat médical joint' : 'Justificatif administratif'), dt(U.addDays(en, 1)), ['validee', 'rejetee'].includes(st) ? dt(U.addDays(en, ri(2, 6))) : null);
         }
       }
     }
-    for (const e of actifs) db.prepare('UPDATE employees SET solde_conges=? WHERE id=?').run(Math.max(-2, R.SOLDE_ANNUEL + ri(0, 9) - (used_by[e.id] || 0)), e.id);
+    for (const e of actifs) await db.prepare('UPDATE employees SET solde_conges=? WHERE id=?').run(Math.max(-2, R.SOLDE_ANNUEL + ri(0, 9) - (used_by[e.id] || 0)), e.id);
     // demandes en cours
     for (let i = 0; i < 14; i++) {
       const e = pick(actifs); const s = nextWork(U.addDays(today, ri(5, 25))); const en = endAfter(s, ri(2, 8));
       const st = pick(['en_attente_chef', 'en_attente_chef', 'en_attente_drh', 'valide']);
-      insL.run(e.id, 'annuel', s, en, U.workdays(s, en), 'Congé annuel', st, st === 'en_attente_chef' ? null : 'favorable', dt(U.addDays(today, -ri(1, 6))), st === 'valide' ? dt(U.addDays(today, -1)) : null);
+      await insL.run(e.id, 'annuel', s, en, U.workdays(s, en), 'Congé annuel', st, st === 'en_attente_chef' ? null : 'favorable', dt(U.addDays(today, -ri(1, 6))), st === 'valide' ? dt(U.addDays(today, -1)) : null);
     }
 
     // --- CAP & avancements
-    db.prepare('INSERT INTO caps (date_session,objet,statut) VALUES (?,?,?)').run(`${Y}-03-18`, `Avancement de grade ${Y} (session 1)`, 'tenue');
-    db.prepare('INSERT INTO caps (date_session,objet,statut) VALUES (?,?,?)').run(`${Y}-12-10`, `Avancement de grade ${Y} (session 2)`, 'planifiee');
+    await db.prepare('INSERT INTO caps (date_session,objet,statut) VALUES (?,?,?)').run(`${Y}-03-18`, `Avancement de grade ${Y} (session 1)`, 'tenue');
+    await db.prepare('INSERT INTO caps (date_session,objet,statut) VALUES (?,?,?)').run(`${Y}-12-10`, `Avancement de grade ${Y} (session 2)`, 'planifiee');
     const insP = db.prepare('INSERT INTO promotions (employee_id,type,de_valeur,a_valeur,mode,cap_id,statut,ref_decision,opened_at,decided_at,annee) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-    const pool = db.prepare("SELECT id, echelon, grade FROM employees WHERE statut='actif' AND date_recrutement < ? ORDER BY RANDOM()").all(`${Y - 4}-01-01`);
+    const pool = await db.prepare("SELECT id, echelon, grade FROM employees WHERE statut='actif' AND date_recrutement < ? ORDER BY RANDOM()").all(`${Y - 4}-01-01`);
     let k = 0;
-    for (let i = 0; i < 38; i++) { const e = pool[k++]; if (e.echelon < 2) continue; const op = randDate(yStart, U.addDays(today, -100)); const de = U.addDays(op, ri(18, 75)); insP.run(e.id, 'echelon', String(e.echelon - 1), String(e.echelon), 'moyen', null, 'valide', `Décision n° ${ri(100, 900)}/${Y}`, op, de, Y); db.prepare('UPDATE employees SET date_dernier_echelon=? WHERE id=?').run(de, e.id); }
-    for (let i = 0; i < 14; i++) { const e = pool[k++]; const gi = R.GRADES.indexOf(e.grade); if (gi < 1) continue; const op = randDate(yStart, `${Y}-03-01`); const de = `${Y}-03-18`; insP.run(e.id, 'grade', R.GRADES[gi - 1], e.grade, 'choix', 1, 'valide', `Arrêté n° ${ri(10, 99)}/${Y}`, op, de, Y); db.prepare('UPDATE employees SET date_dernier_grade=? WHERE id=?').run(de, e.id); }
-    for (let i = 0; i < 5; i++) { const e = pool[k++]; const op = randDate(yStart, U.addDays(today, -100)); insP.run(e.id, 'echelon', String(e.echelon), String(Math.min(10, e.echelon + 1)), 'moyen', null, 'rejete', 'Dossier incomplet', op, U.addDays(op, ri(20, 60)), Y); }
+    for (let i = 0; i < 38; i++) { const e = pool[k++]; if (e.echelon < 2) continue; const op = randDate(yStart, U.addDays(today, -100)); const de = U.addDays(op, ri(18, 75)); await insP.run(e.id, 'echelon', String(e.echelon - 1), String(e.echelon), 'moyen', null, 'valide', `Décision n° ${ri(100, 900)}/${Y}`, op, de, Y); await db.prepare('UPDATE employees SET date_dernier_echelon=? WHERE id=?').run(de, e.id); }
+    for (let i = 0; i < 14; i++) { const e = pool[k++]; const gi = R.GRADES.indexOf(e.grade); if (gi < 1) continue; const op = randDate(yStart, `${Y}-03-01`); const de = `${Y}-03-18`; await insP.run(e.id, 'grade', R.GRADES[gi - 1], e.grade, 'choix', 1, 'valide', `Arrêté n° ${ri(10, 99)}/${Y}`, op, de, Y); await db.prepare('UPDATE employees SET date_dernier_grade=? WHERE id=?').run(de, e.id); }
+    for (let i = 0; i < 5; i++) { const e = pool[k++]; const op = randDate(yStart, U.addDays(today, -100)); await insP.run(e.id, 'echelon', String(e.echelon), String(Math.min(10, e.echelon + 1)), 'moyen', null, 'rejete', 'Dossier incomplet', op, U.addDays(op, ri(20, 60)), Y); }
     R.generatePromotions(db, today);
 
     // --- Formation
-    const forms = db.prepare('SELECT id FROM formateurs').all().map((x) => x.id);
+    const forms = (await db.prepare('SELECT id FROM formateurs').all()).map((x) => x.id);
     const insT = db.prepare('INSERT INTO trainings (titre,domaine,date_debut,date_fin,heures,lieu,capacite,formateur_id,statut,description) VALUES (?,?,?,?,?,?,?,?,?,?)');
     const insEn = db.prepare('INSERT INTO enrollments (training_id,employee_id,statut,note_satisfaction,convoque_at) VALUES (?,?,?,?,?)');
     const catalog = [
@@ -202,33 +201,33 @@ function seed(db, { today = U.today() } = {}) {
     const target = { termine: 9, cours: 3, plan: 2 };
     const lieux = ['Salle de conférences - Wilaya', 'Centre de formation - Dakhla', 'Visioconférence'];
     const pickEmps = (n) => [...actifs].sort(() => rnd() - 0.5).slice(0, n);
-    catalog.forEach((c, i) => {
+    for (const [i, c] of catalog.entries()) {
       const kind = i < 9 ? 'termine' : i < 12 ? 'cours' : 'plan';
       let d1, d2, st;
       if (kind === 'termine') { d1 = U.addDays(yStart, 10 + i * 30); d2 = U.addDays(d1, Math.ceil(c[2] / 7)); st = 'terminee'; }
       else if (kind === 'cours') { d1 = U.addDays(today, -2); d2 = U.addDays(today, 3 + (i - 9)); st = 'en_cours'; }
       else { d1 = U.addDays(today, 20 + (i - 12) * 14); d2 = U.addDays(d1, 3); st = 'planifiee'; }
       const size = kind === 'cours' ? [44, 40, 40][i - 9] : kind === 'termine' ? ri(30, 45) : 0;
-      const tid = Number(insT.run(c[0], c[1], d1, d2, c[2], pick(lieux), kind === 'plan' ? 40 : Math.max(size, 40), pick(forms), st, `Session de renforcement des capacités : ${c[1]}.`).lastInsertRowid);
-      if (kind === 'termine') for (const e of pickEmps(size)) { const pres = rnd() < 0.86; insEn.run(tid, e.id, pres ? 'present' : 'absent', pres ? wpick([[5, 38], [4, 44], [3, 14], [2, 4]]) : null, dt(U.addDays(d1, -14))); }
-      if (kind === 'cours') for (const e of pickEmps(size)) insEn.run(tid, e.id, rnd() < 0.85 ? 'confirme' : 'convoque', null, dt(U.addDays(d1, -10)));
-    });
+      const tid = Number((await insT.run(c[0], c[1], d1, d2, c[2], pick(lieux), kind === 'plan' ? 40 : Math.max(size, 40), pick(forms), st, `Session de renforcement des capacités : ${c[1]}.`)).lastInsertRowid);
+      if (kind === 'termine') for (const e of pickEmps(size)) { const pres = rnd() < 0.86; await insEn.run(tid, e.id, pres ? 'present' : 'absent', pres ? wpick([[5, 38], [4, 44], [3, 14], [2, 4]]) : null, dt(U.addDays(d1, -14))); }
+      if (kind === 'cours') for (const e of pickEmps(size)) await insEn.run(tid, e.id, rnd() < 0.85 ? 'confirme' : 'convoque', null, dt(U.addDays(d1, -10)));
+    }
     // convocations à venir (dont l'agent démo)
-    const planned = db.prepare("SELECT id FROM trainings WHERE statut='planifiee'").all();
-    for (const t of planned) { for (const e of pickEmps(18)) insEn.run(t.id, e.id, 'convoque', null, dt(U.addDays(today, -1))); }
-    db.prepare("INSERT OR REPLACE INTO enrollments (training_id,employee_id,statut,convoque_at) VALUES (?,?,'convoque',?)").run(planned[0].id, agent.id, dt(today));
+    const planned = await db.prepare("SELECT id FROM trainings WHERE statut='planifiee'").all();
+    for (const t of planned) { for (const e of pickEmps(18)) await insEn.run(t.id, e.id, 'convoque', null, dt(U.addDays(today, -1))); }
+    await db.prepare("INSERT INTO enrollments (training_id,employee_id,statut,convoque_at) VALUES (?,?,'convoque',?) ON CONFLICT (training_id,employee_id) DO UPDATE SET statut='convoque', convoque_at=EXCLUDED.convoque_at").run(planned[0].id, agent.id, dt(today));
 
     // --- Recrutements
     const insR = db.prepare('INSERT INTO recruitments (poste,source,candidat,date_candidature,date_offre,date_acceptation,statut,cout,employee_id) VALUES (?,?,?,?,?,?,?,?,?)');
-    const hires = db.prepare("SELECT id, nom, prenom, corps, date_recrutement h FROM employees WHERE date_recrutement >= ? AND date_recrutement <= ?").all(`${Y - 1}-01-01`, today);
+    const hires = await db.prepare("SELECT id, nom, prenom, corps, date_recrutement h FROM employees WHERE date_recrutement >= ? AND date_recrutement <= ?").all(`${Y - 1}-01-01`, today);
     for (const e of hires) {
       const acc = U.addDays(e.h, -ri(5, 20)); const off = U.addDays(acc, -ri(3, 10)); const cand = U.addDays(off, -ri(25, 70));
-      insR.run(e.corps, 'externe', `${e.prenom} ${e.nom}`, cand, off, acc, 'acceptee', ri(4500, 11000), e.id);
+      await insR.run(e.corps, 'externe', `${e.prenom} ${e.nom}`, cand, off, acc, 'acceptee', ri(4500, 11000), e.id);
     }
-    for (let i = 0; i < 8; i++) { const off = randDate(yStart, U.addDays(today, -10)); insR.run(pick(Object.keys(R.CORPS)), 'externe', `${pick(PRENOMS_H.concat(PRENOMS_F))} ${pick(NOMS)}`, U.addDays(off, -ri(20, 60)), off, null, 'refusee', ri(3500, 8000), null); }
-    for (let i = 0; i < 4; i++) { const off = U.addDays(today, -ri(2, 12)); insR.run(pick(Object.keys(R.CORPS)), 'externe', `${pick(PRENOMS_H.concat(PRENOMS_F))} ${pick(NOMS)}`, U.addDays(off, -ri(20, 40)), off, null, 'emise', ri(3500, 8000), null); }
-    const chefs = db.prepare("SELECT id, nom, prenom FROM employees WHERE statut='actif' ORDER BY RANDOM() LIMIT 9").all();
-    for (const c of chefs) { const acc = randDate(yStart, U.addDays(today, -5)); const off = U.addDays(acc, -ri(2, 5)); insR.run('Chef de service (nomination interne)', 'interne', `${c.prenom} ${c.nom}`, U.addDays(off, -ri(10, 30)), off, acc, 'acceptee', ri(600, 2000), c.id); }
+    for (let i = 0; i < 8; i++) { const off = randDate(yStart, U.addDays(today, -10)); await insR.run(pick(Object.keys(R.CORPS)), 'externe', `${pick(PRENOMS_H.concat(PRENOMS_F))} ${pick(NOMS)}`, U.addDays(off, -ri(20, 60)), off, null, 'refusee', ri(3500, 8000), null); }
+    for (let i = 0; i < 4; i++) { const off = U.addDays(today, -ri(2, 12)); await insR.run(pick(Object.keys(R.CORPS)), 'externe', `${pick(PRENOMS_H.concat(PRENOMS_F))} ${pick(NOMS)}`, U.addDays(off, -ri(20, 40)), off, null, 'emise', ri(3500, 8000), null); }
+    const chefs = await db.prepare("SELECT id, nom, prenom FROM employees WHERE statut='actif' ORDER BY RANDOM() LIMIT 9").all();
+    for (const c of chefs) { const acc = randDate(yStart, U.addDays(today, -5)); const off = U.addDays(acc, -ri(2, 5)); await insR.run('Chef de service (nomination interne)', 'interne', `${c.prenom} ${c.nom}`, U.addDays(off, -ri(10, 30)), off, acc, 'acceptee', ri(600, 2000), c.id); }
 
     // --- Attestations (e-services)
     const insAt = db.prepare('INSERT INTO attestations (employee_id,type,code,params,statut,requested_at,signed_at,signed_by) VALUES (?,?,?,?,?,?,?,?)');
@@ -240,26 +239,30 @@ function seed(db, { today = U.today() } = {}) {
       for (let i = 0; i < n; i++) {
         const e = pick(actifs); const type = wpick([['travail', 45], ['salaire', 30], ['mission', 12], ['conge', 13]]);
         const d = nextWork(randDate(ms, me)); const d0 = d > today ? today : d; const req = dt(d0);
-        if (type === 'travail' || type === 'salaire') insAt.run(e.id, type, codeGen(), '{}', 'signee', req, req, 'Signature électronique automatique');
-        else { const delayH = wpick([[ri(2, 8), 50], [ri(9, 30), 35], [ri(31, 72), 15]]); const sg = new Date(new Date(req + 'Z').getTime() + delayH * 3600e3).toISOString().slice(0, 19); const pend = d0 >= U.addDays(today, -1) && rnd() < 0.7; insAt.run(e.id, type, codeGen(), type === 'mission' ? JSON.stringify({ destination: 'Laâyoune', objet: 'Réunion de coordination', date_debut: U.addDays(d0, 5), date_fin: U.addDays(d0, 6) }) : '{}', pend ? 'en_attente' : 'signee', req, pend ? null : sg, pend ? null : 'Chef DRH'); }
+        if (type === 'travail' || type === 'salaire') await insAt.run(e.id, type, codeGen(), '{}', 'signee', req, req, 'Signature électronique automatique');
+        else { const delayH = wpick([[ri(2, 8), 50], [ri(9, 30), 35], [ri(31, 72), 15]]); const sg = new Date(new Date(req + 'Z').getTime() + delayH * 3600e3).toISOString().slice(0, 19); const pend = d0 >= U.addDays(today, -1) && rnd() < 0.7; await insAt.run(e.id, type, codeGen(), type === 'mission' ? JSON.stringify({ destination: 'Laâyoune', objet: 'Réunion de coordination', date_debut: U.addDays(d0, 5), date_fin: U.addDays(d0, 6) }) : '{}', pend ? 'en_attente' : 'signee', req, pend ? null : sg, pend ? null : 'Chef DRH'); }
       }
     }
-    insAt.run(agent.id, 'travail', codeGen(), '{}', 'signee', dt(U.addDays(today, -9)), dt(U.addDays(today, -9)), 'Signature électronique automatique');
+    await insAt.run(agent.id, 'travail', codeGen(), '{}', 'signee', dt(U.addDays(today, -9)), dt(U.addDays(today, -9)), 'Signature électronique automatique');
 
     // --- Notifications de démonstration
-    const nU = db.prepare('SELECT id, username FROM users').all(); const ins = db.prepare('INSERT INTO notifications (user_id,message,lien,created_at) VALUES (?,?,?,?)');
-    for (const u of nU) if (u.username === 'drh') ins.run(u.id, 'Des propositions d\'avancement sont en attente de validation.', '#/avancements', dt(today));
-    for (const u of nU) if (u.username === 'agent') ins.run(u.id, 'Vous êtes convoqué(e) à une session de formation : veuillez confirmer votre présence.', '#/formations', dt(today));
+    const nU = await db.prepare('SELECT id, username FROM users').all(); const ins = db.prepare('INSERT INTO notifications (user_id,message,lien,created_at) VALUES (?,?,?,?)');
+    for (const u of nU) if (u.username === 'drh') await ins.run(u.id, 'Des propositions d\'avancement sont en attente de validation.', '#/avancements', dt(today));
+    for (const u of nU) if (u.username === 'agent') await ins.run(u.id, 'Vous êtes convoqué(e) à une session de formation : veuillez confirmer votre présence.', '#/formations', dt(today));
   });
 }
 
 module.exports = { seed };
 
 if (require.main === module) {
-  if (process.argv.includes('--reset')) for (const f of [DB_PATH, DB_PATH + '-wal', DB_PATH + '-shm']) fs.rmSync(f, { force: true });
-  const db = open();
-  if (db.prepare('SELECT COUNT(*) c FROM employees').get().c) { console.log('Base déjà peuplée (utiliser --reset).'); process.exit(0); }
-  seed(db);
-  const c = (t, w = '1') => db.prepare(`SELECT COUNT(*) c FROM ${t} WHERE ${w}`).get().c;
-  console.log(`OK: ${c('employees', "statut='actif'")} actifs, ${c('employees', "statut='parti'")} partis, ${c('leaves')} congés, ${c('absences')} absences, ${c('promotions')} avancements, ${c('trainings')} formations, ${c('attestations')} attestations`);
+  (async () => {
+    const db = await open();
+    if (process.argv.includes('--reset')) await reset(db);
+    if ((await db.prepare('SELECT COUNT(*) c FROM employees').get()).c) { console.log('Base déjà peuplée (utiliser --reset).'); await db.close(); return; }
+    await seed(db);
+    const c = async (t, w = 'TRUE') => (await db.prepare(`SELECT COUNT(*) c FROM ${t} WHERE ${w}`).get()).c;
+    const n = { a: await c('employees', "statut='actif'"), p: await c('employees', "statut='parti'"), l: await c('leaves'), b: await c('absences'), v: await c('promotions'), f: await c('trainings'), t: await c('attestations') };
+    await db.close();
+    console.log(`OK: ${n.a} actifs, ${n.p} partis, ${n.l} congés, ${n.b} absences, ${n.v} avancements, ${n.f} formations, ${n.t} attestations`);
+  })().catch((e) => { console.error(e); process.exit(1); });
 }
