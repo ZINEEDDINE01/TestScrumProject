@@ -64,3 +64,17 @@ input,select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line)
 .loading{padding:30px}
 @media (max-width:900px){.layout{grid-template-columns:1fr}.side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.side nav{flex-direction:row;flex-wrap:wrap}.me{margin:0;width:100%}.grid2,.grid3{grid-template-columns:1fr}.main{padding:16px}.formgrid.one{grid-template-columns:1fr}.dl{grid-template-columns:120px 1fr}}
 @media print{.side,.chips,.page-h button,.tabs,.toast{display:none!important}.layout{display:block}.main{padding:0}.card,.tile{break-inside:avoid;box-shadow:none}body{background:#fff}}
+/* Copilote décisionnel */
+.copilot{background:#18232b;color:#eef2f4;border:1px solid #c8a24a66;border-radius:14px;padding:18px 20px;margin-bottom:18px;box-shadow:0 6px 24px rgba(0,0,0,.18)}
+.cp-h{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}.cp-h h3{margin:4px 0 2px;color:#f0c56a;font-size:19px}
+.cp-tag{background:#c8a24a;color:#1b1400;font-weight:700;font-size:12px;padding:2px 10px;border-radius:12px}.cp-sub{margin:0;font-size:12.5px;color:#a9b6bd}.cp-count{font-size:13px;color:#a9b6bd}
+.cp-card{background:#223039;border:1px solid #33444e;border-radius:10px;padding:16px 18px}.cp-card h4{margin:10px 0 8px;font-size:17px;color:#fff}
+.cp-meta{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;color:#a9b6bd}
+.cp-prio{font-weight:700;padding:2px 10px;border-radius:12px;color:#fff}.cp-prio.haute{background:#a3261e}.cp-prio.moyenne{background:#8a5a00}.cp-prio.optim{background:#1b6e3a}
+.cp-dl{display:grid;grid-template-columns:130px 1fr;gap:6px 14px;margin:0 0 12px;font-size:14px}.cp-dl dt{color:#a9b6bd}.cp-dl dd{margin:0}
+.cp-reco{background:#3a2f12;border-left:4px solid #c8a24a;padding:10px 14px;border-radius:6px;margin-bottom:10px}.cp-reco b{font-size:12.5px;color:#f0c56a}.cp-reco p{margin:4px 0 0;color:#fff4d6;font-weight:500}
+.cp-how{font-size:12.5px;color:#a9b6bd;margin-bottom:12px}.cp-how summary,.cp-hist summary{cursor:pointer}
+.cp-actions{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.cp-actions button{margin-right:6px}
+.cp-ok{background:#2e8b57;color:#fff;border-color:#2e8b57;font-weight:600}.cp-adj{background:transparent;color:#eef2f4;border-color:#6c7e88}.cp-ign{background:transparent;color:#a9b6bd;border-color:transparent;text-decoration:underline}.cp-nav{background:transparent;color:#eef2f4;border-color:#33444e;margin:0 0 0 4px}
+.cp-empty{padding:18px;color:#7fd49e;text-align:center}.cp-hist{margin-top:12px;font-size:13px;color:#a9b6bd}.cp-hist ul{padding-left:18px}.cp-hist small{color:#8a9aa3}
+@media print{.copilot{display:none}}
