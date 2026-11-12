@@ -2,7 +2,7 @@ import { h, raw, api, num, pctf, state, actions, MOIS } from './core.js';
 import { mountCopilot } from './copilot.js';
 import { hbar, columns, pyramid, line, meter, legend, dataTable, card, COL } from './charts.js';
 
-const tile = (label, value, { sub = '', freq = '', formula = '', big = false } = {}) => h`<div class="tile ${big ? 'big' : ''}" ${raw(formula ? `title="${formula.replace(/"/g, '&quot;')}"` : '')}><div class="t-label">${label}</div><div class="t-value">${value}</div>${sub ? h`<div class="t-sub">${sub}</div>` : ''}${freq ? h`<div class="t-freq">${freq}</div>` : ''}</div>`;
+const tile = (label, value, { sub = '', freq = '', formula = '', big = false } = {}) => h`<div class="tile ${big ? 'big' : ''}" ${raw(formula ? `title="${formula.replace(/"/g, '&quot;')}"` : '')}><div class="t-label">${label}</div><div class="t-value">${value}</div><div class="t-foot">${sub ? h`<span class="t-sub">${sub}</span>` : ''}${freq ? h`<span class="t-freq">${freq}</span>` : ''}</div></div>`;
 const F = {}; // formules indexées
 const fm = (id) => (F[id] ? `${F[id].formule}` : '');
 
@@ -15,19 +15,19 @@ export async function dashboard(root) {
   root.innerHTML = String(h`
   <div class="page-h"><div><h1>${state.user.role === 'wali' ? 'Tableau de bord de Monsieur le Wali' : 'Tableau de bord exécutif'}</h1><p class="muted">Situation au ${d.as_of.split('-').reverse().join('/')} · ${num(e.total)} fonctionnaires · Wilaya de la Région Dakhla-Oued Ed-Dahab</p></div>
   <button class="ghost" data-act="print">Imprimer la synthèse</button></div>
-  <nav class="chips" aria-label="Sections">${sections.map(([id, l]) => h`<a href="#/dashboard" data-act="jump" data-to="${id}">${l}</a>`)}</nav>
+  <nav class="chips" aria-label="Sections">${sections.map(([id, l], i) => h`<button type="button" class="${i === 0 ? 'on' : ''}" data-act="jump" data-to="${id}">${l}</button>`)}</nav>
 
   <div class="tiles hero">
     ${tile('Effectifs totaux', h`${num(e.total)} <small>fonctionnaires</small>`, { big: true, sub: `${num(rh.embauches)} entrées · ${num(rh.departs)} sorties en ${d.annee}`, freq: 'Temps réel' })}
-    ${tile('Taux de présence', pctf(d.entete.presence_mois), { big: true, sub: `Ce mois · aujourd'hui ${pctf(d.entete.taux_presence_aujourdhui)} (${num(a.absents_aujourdhui)} absents)`, freq: 'Quotidienne' })}
+    ${tile('Taux de présence', pctf(d.entete.presence_mois), { big: true, sub: `Ce mois · aujourd'hui ${pctf(d.entete.taux_presence_aujourdhui)} (${num(a.absents_aujourdhui)} absents)`, freq: 'Quotidienne', formula: fm('presence') })}
     ${tile('Sessions de formation en cours', h`${num(d.entete.sessions_en_cours)} <small>sessions</small>`, { big: true, sub: `${num(d.entete.inscrits_en_cours)} inscrits`, freq: 'Par session' })}
   </div>
   <div id="copilot"></div>
   ${alerts.length ? h`<section class="card alerts"><h3>Alertes</h3><ul>${alerts.slice(0, 6).map((x) => h`<li class="al ${x.niveau}"><span aria-hidden="true">${x.niveau === 'critique' ? '✖' : x.niveau === 'alerte' ? '▲' : 'ℹ'}</span> ${x.message} ${x.lien ? h`<a href="${x.lien}">Traiter</a>` : ''}</li>`)}</ul></section>` : ''}
 
   <h2 id="effectifs" class="sec">1. Effectifs & structure</h2>
-  <div class="tiles">
-    ${tile('Taux de féminisation', pctf(e.feminisation), { sub: `${num(e.femmes)} femmes · ${num(e.hommes)} hommes`, freq: 'Trimestrielle' })}
+  <div class="tiles five">
+    ${tile('Taux de féminisation', pctf(e.feminisation), { sub: `${num(e.femmes)} femmes · ${num(e.hommes)} hommes`, freq: 'Trimestrielle', formula: fm('fem') })}
     ${tile("Part de l'encadrement supérieur", pctf(e.cadres_sup_pct), { sub: `${num(e.cadres_sup)} cadres · dont ${pctf(e.cadres_femmes_pct, 0)} de femmes`, freq: 'Trimestrielle' })}
     ${tile("Ratio d'encadrement", pctf(e.encadrement_pct), { sub: `${num(e.cadres_ing)} administrateurs et ingénieurs`, freq: 'Trimestrielle', formula: fm('encad') })}
     ${tile('Âge moyen', h`${num(e.age_moyen, 1)} <small>ans</small>`, { sub: `Ancienneté moyenne ${num(e.anciennete_moyenne, 1)} ans`, freq: 'Mensuelle' })}
@@ -114,5 +114,7 @@ export async function dashboard(root) {
   <section class="card"><table class="t"><thead><tr><th>Indicateur</th><th>Formule</th><th>Précisions</th></tr></thead><tbody>${d.formules.map((f) => h`<tr><td><b>${f.nom}</b></td><td><code>${f.formule}</code></td><td>${f.note}</td></tr>`)}</tbody></table></section>`);
   mountCopilot(root.querySelector('#copilot'));
 }
+const spy = () => { const bs = [...document.querySelectorAll('.chips button')]; let cur = bs[0]; for (const b of bs) { const t = document.getElementById(b.dataset.to); if (t && t.getBoundingClientRect().top < 140) cur = b; } bs.forEach((b) => b.classList.toggle('on', b === cur)); };
+window.addEventListener('scroll', () => { if (document.querySelector('.chips')) spy(); }, { passive: true });
 actions.jump = (el) => { document.getElementById(el.dataset.to)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 actions.print = () => window.print();

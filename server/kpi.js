@@ -18,6 +18,8 @@ const FORMULES = [
   { id: 'delai', nom: 'Délai de recrutement', formule: "Σ (Date d'acceptation de l'offre − Date de candidature) / Nombre d'embauches", note: 'En jours calendaires.' },
   { id: 'acceptation', nom: "Taux d'acceptation des offres", formule: '(Offres acceptées / Offres émises) × 100', note: "Offres émises dans l'année (en cours incluses)." },
   { id: 'heures', nom: 'Heures de formation par fonctionnaire', formule: "Nombre total d'heures de formation / Nombre d'employés à temps plein", note: "Heures effectivement suivies (présence émargée) sur l'année." },
+  { id: 'presence', nom: 'Taux de présence', formule: 'T_présence = (1 − Σ effectifs absents / Effectif total) × 100', note: "Mois en cours : journées de congé et d'absence rapportées aux jours ouvrés écoulés ; valeur du jour affichée en complément." },
+  { id: 'fem', nom: 'Taux de féminisation', formule: 'T_fem = (Nombre de femmes / Effectif total) × 100', note: 'Fonctionnaires actifs.' },
   { id: 'avanc', nom: "Taux d'avancement de grade / d'échelon", formule: 'T_avanc = (Fonctionnaires promus / Éligibles CAP) × 100', note: "Année en cours ; éligibles = dossiers d'avancement ouverts (validés, rejetés, en attente)." },
   { id: 'form', nom: 'Taux de couverture des formations', formule: 'T_form = (Fonctionnaires formés / Effectif total Wilaya + annexes) × 100', note: 'Formés = au moins une formation suivie (présence émargée) dans l\'année.' },
   { id: 'encad', nom: "Ratio d'encadrement", formule: "R_encad = (Cadres et ingénieurs / Effectif total) × 100", note: 'Cadres et ingénieurs = corps Administrateur et Ingénieur.' },
