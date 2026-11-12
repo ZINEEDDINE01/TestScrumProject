@@ -12,6 +12,8 @@ npm run seed           # vide les tables et recharge les données fictives
 npm test               # 17 tests d'intégration, dans un schéma PostgreSQL jetable
 ```
 
+Si le port 5432 est déjà utilisé (PostgreSQL installé en local), lancer Docker sur un autre port : `SIGRH_DB_PORT=55432 docker compose up -d`, puis `DATABASE_URL=postgres://sigrh:sigrh@127.0.0.1:55432/sigrh` (PowerShell : `$env:SIGRH_DB_PORT=55432` et `$env:DATABASE_URL="…"`).
+
 Connexion : variable `DATABASE_URL` (défaut `postgres://sigrh:sigrh@localhost:5432/sigrh`). Les tests créent puis suppriment un schéma `t_xxxx` dans cette base ; l'utilisateur doit pouvoir créer des schémas.
 
 Comptes de démonstration (mot de passe `demo1234`) : `wali`, `drh`, `chef`, `agent`. Toutes les données sont fictives.

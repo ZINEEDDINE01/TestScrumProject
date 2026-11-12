@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: sigrh
       POSTGRES_PASSWORD: sigrh
       POSTGRES_DB: sigrh
-    ports: ["5432:5432"]
+    ports: ["${SIGRH_DB_PORT:-5432}:5432"]  # port hôte modifiable si 5432 est déjà pris
     volumes: ["pgdata:/var/lib/postgresql/data"]
 volumes:
   pgdata:
