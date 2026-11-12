@@ -17,7 +17,8 @@ test.after(async () => { server.close(); await dropSchema(db); });
 async function as(user) {
   const r = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: 'demo1234' }) });
   const cookie = r.headers.get('set-cookie').split(';')[0];
-  return async (path, method = 'GET', body) => { const x = await fetch(base + '/api' + path, { method, headers: { cookie, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body || {}) }); return { status: x.status, body: await x.json().catch(() => null) }; };
+  const call = async (path, method = 'GET', body) => { const x = await fetch(base + '/api' + path, { method, headers: { cookie, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body || {}) }); return { status: x.status, body: await x.json().catch(() => null) }; };
+  call.cookie = cookie; return call;
 }
 
 test('workdays exclut week-ends et fériés', () => { assert.equal(U.workdays('2026-11-02', '2026-11-08'), 4); /* 6 nov férié */ });
@@ -106,4 +107,49 @@ test('chef de service : périmètre limité à son équipe', async () => {
   const c = await as('chef'); const team = (await c('/employees')).body; assert.equal((await c('/employees')).status, 200); assert.ok(team.total > 0 && team.total < 60);
   for (const p of ['/leaves', '/absences', '/promotions', '/alerts']) assert.equal((await c(p)).status, 200, p);
   const other = (await (await as('drh'))('/employees?limit=1&service_id=1')).body.items[0]; assert.equal((await c('/employees/' + other.id)).status, 403);
+});
+
+test('évaluation annuelle : chef saisit, DRH valide, l\'agent la consulte', async () => {
+  const c = await as('chef'), d = await as('drh'), a = await as('agent'); const ag = (await a('/me')).body; const chef = (await c('/me')).body;
+  const annee = Number(U.today().slice(0, 4)) - 1;
+  assert.equal((await c('/evaluations', 'POST', { employee_id: ag.employee_id, annee, note: 25, objectifs_pct: 80 })).status, 400);
+  assert.equal((await c('/evaluations', 'POST', { employee_id: chef.employee_id, annee, note: 15, objectifs_pct: 80 })).status, 403); // pas d'auto-évaluation
+  assert.equal((await a('/evaluations', 'POST', { employee_id: ag.employee_id, annee, note: 15, objectifs_pct: 80 })).status, 403);
+  assert.equal((await c('/evaluations', 'POST', { employee_id: ag.employee_id, annee, note: 15.5, objectifs_pct: 85, appreciation: 'Bon travail' })).status, 200);
+  const v = (await d(`/evaluations?annee=${annee}&statut=saisie`)).body.find((x) => x.employee_id === ag.employee_id); assert.ok(v);
+  assert.equal((await c(`/evaluations/${v.id}/decision`, 'POST', { action: 'valider' })).status, 403);
+  assert.equal((await d(`/evaluations/${v.id}/decision`, 'POST', { action: 'renvoyer' })).status, 400); // motif obligatoire
+  assert.equal((await d(`/evaluations/${v.id}/decision`, 'POST', { action: 'valider' })).status, 200);
+  assert.equal((await c('/evaluations', 'POST', { employee_id: ag.employee_id, annee, note: 10, objectifs_pct: 10 })).status, 409); // déjà validée
+  assert.ok((await a('/employees/' + ag.employee_id)).body.evaluations.some((x) => x.annee === annee && x.note === 15.5 && x.statut === 'validee'));
+});
+test('avancement de grade : exige une évaluation annuelle validée', async () => {
+  const d = await as('drh'); const p = (await d('/promotions?statut=propose&type=grade')).body[0]; assert.ok(p);
+  await db.prepare('DELETE FROM evaluations WHERE employee_id=? AND annee=?').run(p.employee_id, p.annee);
+  const r = await d(`/promotions/${p.id}/decision`, 'POST', { action: 'valider', ref_decision: 'Arrêté test' }); assert.equal(r.status, 422); assert.match(r.body.error, /évaluation/);
+  await db.prepare("INSERT INTO evaluations (employee_id,annee,note,objectifs_pct,statut,created_at) VALUES (?,?,14,80,'validee','2026-01-01T00:00:00')").run(p.employee_id, p.annee);
+  assert.equal((await d(`/promotions/${p.id}/decision`, 'POST', { action: 'valider', ref_decision: 'Arrêté test' })).status, 200);
+});
+test('besoin de formation : agent -> chef -> DRH (convocation)', async () => {
+  const a = await as('agent'), c = await as('chef'), d = await as('drh');
+  const tr = (await a('/trainings')).body.find((t) => t.statut === 'planifiee' && !t.mon_inscription); assert.ok(tr);
+  const r = await a('/besoins', 'POST', { theme: 'Gestion du temps', training_id: tr.id, justification: 'Charge de travail' }); assert.equal(r.status, 200);
+  assert.equal((await a('/besoins', 'POST', { theme: 'gestion du temps' })).status, 409);
+  assert.equal((await a(`/besoins/${r.body.id}/decision`, 'POST', { action: 'retenir' })).status, 403);
+  assert.equal((await d(`/besoins/${r.body.id}/decision`, 'POST', { action: 'retenir' })).status, 200); // la DRH peut décider sans avis, l'avis du chef reste consultatif
+  assert.equal((await a('/trainings')).body.find((t) => t.id === tr.id).mon_inscription.statut, 'convoque');
+  const r2 = await a('/besoins', 'POST', { theme: 'Excel' }); assert.equal((await c(`/besoins/${r2.body.id}/decision`, 'POST', { action: 'favorable', commentaire: 'Utile' })).status, 200);
+  assert.equal((await d(`/besoins/${r2.body.id}/decision`, 'POST', { action: 'rejeter' })).status, 400);
+  assert.equal((await d(`/besoins/${r2.body.id}/decision`, 'POST', { action: 'rejeter', commentaire: 'Budget' })).status, 200);
+});
+
+test('documents : PDF signé avec QR code, contrôle d\'accès', async () => {
+  const a = await as('agent'), c = await as('chef'); const t = (await a('/attestations', 'POST', { type: 'travail' })).body;
+  const id = (await a('/attestations')).body.find((x) => x.code === t.code).id;
+  const r = await fetch(`${base}/doc/${id}.pdf`, { headers: { cookie: a.cookie } }); assert.equal(r.status, 200); assert.equal(r.headers.get('content-type'), 'application/pdf');
+  const buf = Buffer.from(await r.arrayBuffer()); assert.equal(buf.subarray(0, 5).toString(), '%PDF-'); assert.ok(buf.length > 2000);
+  assert.equal((await fetch(`${base}/doc/${id}.pdf`, { headers: { cookie: c.cookie } })).status, 403); assert.equal((await fetch(`${base}/doc/${id}.pdf`)).status, 401);
+  const html = await (await fetch(`${base}/doc/${id}`, { headers: { cookie: a.cookie } })).text(); assert.match(html, /<svg/); assert.ok(html.includes(`/verify/${t.code}`)); assert.ok(html.includes(`/doc/${id}.pdf`));
+  const m = (await a('/attestations', 'POST', { type: 'mission', destination: 'Rabat', objet: 'Réunion', date_debut: U.today(), date_fin: U.today() })).body;
+  assert.equal((await fetch(`${base}/doc/${m.id}.pdf`, { headers: { cookie: a.cookie } })).status, 409); // non signé
 });

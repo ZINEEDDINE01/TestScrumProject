@@ -1,12 +1,13 @@
 import { h, raw, api, state, actions, forms, $, toast, field } from './core.js';
 import { dashboard } from './dashboard.js';
 import { employees, employee, employeeNew, leaves, absences } from './people.js';
+import { evaluations } from './eval.js';
 import { promotions, trainings, trainingDetail, recruitments, eservices, notifications } from './hr.js';
 
 const NAV = {
   wali: [['dashboard', 'Tableau de bord', '📊']],
-  drh: [['dashboard', 'Tableau de bord', '📊'], ['fonctionnaires', 'Fonctionnaires', '👥'], ['recrutements', 'Recrutements', '🧑‍💼'], ['conges', 'Congés', '🏖️'], ['absences', 'Absences', '🕒'], ['avancements', 'Avancements', '📈'], ['formations', 'Formation', '🎓'], ['eservices', 'E-services', '📄']],
-  chef: [['fonctionnaires', 'Mon équipe', '👥'], ['conges', 'Congés', '🏖️'], ['absences', 'Absences', '🕒'], ['avancements', 'Avancements', '📈'], ['formations', 'Formation', '🎓'], ['eservices', 'E-services', '📄'], ['mon-dossier', 'Mon dossier', '🗂️']],
+  drh: [['dashboard', 'Tableau de bord', '📊'], ['fonctionnaires', 'Fonctionnaires', '👥'], ['recrutements', 'Recrutements', '🧑‍💼'], ['conges', 'Congés', '🏖️'], ['absences', 'Absences', '🕒'], ['avancements', 'Avancements', '📈'], ['evaluations', 'Évaluations', '📝'], ['formations', 'Formation', '🎓'], ['eservices', 'E-services', '📄']],
+  chef: [['fonctionnaires', 'Mon équipe', '👥'], ['conges', 'Congés', '🏖️'], ['absences', 'Absences', '🕒'], ['avancements', 'Avancements', '📈'], ['evaluations', 'Évaluations', '📝'], ['formations', 'Formation', '🎓'], ['eservices', 'E-services', '📄'], ['mon-dossier', 'Mon dossier', '🗂️']],
   fonctionnaire: [['mon-dossier', 'Mon dossier', '🗂️'], ['conges', 'Congés', '🏖️'], ['absences', 'Absences', '🕒'], ['avancements', 'Ma carrière', '📈'], ['formations', 'Formation', '🎓'], ['eservices', 'E-services', '📄']],
 };
 const ROLE_LABEL = { wali: 'Wali', drh: 'Division RH', chef: 'Chef de service', fonctionnaire: 'Fonctionnaire' };
@@ -50,6 +51,7 @@ on(/^mon-dossier$/, (v) => employee(v, state.user.employee_id));
 on(/^conges$/, (v) => leaves(v));
 on(/^absences$/, (v) => absences(v));
 on(/^avancements$/, (v) => promotions(v));
+on(/^evaluations$/, (v) => evaluations(v));
 on(/^formations$/, (v) => trainings(v));
 on(/^formations\/(\d+)$/, (v, m) => trainingDetail(v, Number(m[1])));
 on(/^recrutements$/, (v) => recruitments(v));

@@ -245,6 +245,21 @@ async function seed(db, { today = U.today() } = {}) {
     }
     await insAt.run(agent.id, 'travail', codeGen(), '{}', 'signee', dt(U.addDays(today, -9)), dt(U.addDays(today, -9)), 'Signature électronique automatique');
 
+    // --- Évaluations annuelles (≈ 85 % validées, quelques-unes en attente de validation DRH)
+    const insV = db.prepare('INSERT INTO evaluations (employee_id,annee,note,objectifs_pct,appreciation,statut,saisi_par,created_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?)');
+    const APPR = ['Très bon investissement, sens du service public.', 'Travail régulier et fiable.', 'Bonne maîtrise des dossiers, à renforcer en autonomie.', 'Résultats conformes aux objectifs fixés.'];
+    for (const e of actifs) {
+      const r = rnd(); if (r > 0.92 && e.id !== agent.id) continue; // 8 % non évalués
+      const note = Math.min(20, Math.max(8, Math.round((14 + (rnd() + rnd() + rnd() - 1.5) * 3.2) * 4) / 4));
+      const pend = r > 0.85 && r <= 0.92;
+      await insV.run(e.id, Y, note, Math.round(55 + rnd() * 45), pick(APPR), pend ? 'saisie' : 'validee', 'Chef de service', dt(U.addDays(today, -ri(15, 150))), pend ? null : dt(U.addDays(today, -ri(1, 14))));
+    }
+    // --- Besoins de formation exprimés
+    const insB = db.prepare('INSERT INTO besoins_formation (employee_id,theme,justification,training_id,statut,commentaire_chef,created_at) VALUES (?,?,?,?,?,?,?)');
+    const plan = (await db.prepare("SELECT id FROM trainings WHERE statut='planifiee' ORDER BY date_debut").all())[0];
+    await insB.run(agent.id, 'Rédaction administrative avancée', "Rédaction quotidienne de courriers et rapports d'activité.", null, 'soumis', null, dt(U.addDays(today, -2)));
+    for (const [theme, st] of [['Gestion des archives numériques', 'soumis'], ['Accueil et relation usager', 'avis_favorable'], ['Marchés publics : bases', 'avis_favorable'], ['Excel avancé', 'avis_defavorable']]) await insB.run(pick(actifs).id, theme, 'Besoin lié aux missions du service.', st === 'avis_favorable' ? plan.id : null, st, st === 'soumis' ? null : 'Avis du chef de service.', dt(U.addDays(today, -ri(3, 20))));
+
     // --- Notifications de démonstration
     const nU = await db.prepare('SELECT id, username FROM users').all(); const ins = db.prepare('INSERT INTO notifications (user_id,message,lien,created_at) VALUES (?,?,?,?)');
     for (const u of nU) if (u.username === 'drh') await ins.run(u.id, 'Des propositions d\'avancement sont en attente de validation.', '#/avancements', dt(today));

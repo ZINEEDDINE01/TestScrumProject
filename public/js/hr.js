@@ -50,7 +50,7 @@ actions['cap-new'] = () => modal('Planifier une CAP', h`<form data-form="cap">${
 
 // ------------------------------------------------------------ Formations
 export async function trainings(root) {
-  const u = state.user; const list = await api('/trainings'); const me = u.employee_id ? await api('/employees/' + u.employee_id) : null;
+  const u = state.user; const list = await api('/trainings'); const besoins = await api('/besoins'); const me = u.employee_id ? await api('/employees/' + u.employee_id) : null;
   const mine = list.filter((t) => t.mon_inscription && ['convoque', 'confirme', 'decline'].includes(t.mon_inscription.statut) && !['terminee', 'annulee'].includes(t.statut));
   const done = list.filter((t) => t.mon_inscription?.statut === 'present');
   const respBtns = (t) => { const s = t.mon_inscription.statut; return h`${s !== 'confirme' ? h`<button class="mini ok" data-act="enr" data-id="${t.mon_inscription.id}" data-a="confirme">Confirmer ma présence</button>` : ''}${s !== 'decline' ? h`<button class="mini ko" data-act="enr" data-id="${t.mon_inscription.id}" data-a="decline">Me désister</button>` : ''}`; };
@@ -58,9 +58,23 @@ export async function trainings(root) {
   ${me ? h`<section class="card"><p class="big-n">${num(me.heures_formation_annee)} h <small>suivies cette année · ${num(me.heures_formation_total)} h au total</small></p></section>` : ''}
   ${mine.length ? h`<section class="card"><h3>Mes invitations</h3><table class="t"><tbody>${mine.map((t) => h`<tr><td><b>${t.titre}</b><br><small class="muted">${fmtDate(t.date_debut)} → ${fmtDate(t.date_fin)} · ${t.heures} h · ${t.lieu || ''}</small></td><td>${badge(t.mon_inscription.statut)}</td><td class="nowrap">${respBtns(t)}</td></tr>`)}</tbody></table></section>` : ''}
   ${done.length ? h`<section class="card"><h3>Mes formations suivies</h3><table class="t"><tbody>${done.map((t) => h`<tr><td>${t.titre}</td><td>${fmtDate(t.date_debut)}</td><td>${t.heures} h</td><td>${t.mon_inscription.note_satisfaction ? h`Ma note : ${t.mon_inscription.note_satisfaction}/5` : h`<span class="nowrap">Évaluer : ${[1, 2, 3, 4, 5].map((n) => h`<button class="mini" data-act="rate" data-id="${t.mon_inscription.id}" data-n="${n}" aria-label="Note ${n} sur 5">${n}</button>`)}</span>`}</td></tr>`)}</tbody></table></section>` : ''}
+  <section class="card"><div class="row spread"><h3>Besoins de formation</h3>${u.employee_id ? h`<button class="primary" data-act="need-new">+ Exprimer un besoin</button>` : ''}</div>
+  <p class="note">Circuit : agent → avis du chef de service → décision de la DRH (intégration au plan et convocation).</p>
+  <div class="tscroll"><table class="t"><thead><tr>${u.role !== 'fonctionnaire' ? h`<th>Fonctionnaire</th>` : ''}<th>Thème</th><th>Session visée</th><th>Statut</th><th></th></tr></thead><tbody>${besoins.map((b) => h`<tr>${u.role !== 'fonctionnaire' ? h`<td>${empLink(b)}</td>` : ''}<td><b>${b.theme}</b>${b.justification ? h`<br><small class="muted">${b.justification}</small>` : ''}</td><td>${b.training || '—'}</td><td>${badge('bs_' + b.statut.replace('avis_', 'avis_'))}${b.commentaire_chef ? h`<br><small class="muted">Chef : ${b.commentaire_chef}</small>` : ''}${b.commentaire_drh ? h`<br><small class="muted">DRH : ${b.commentaire_drh}</small>` : ''}</td>
+  <td class="nowrap">${u.role === 'chef' && b.statut === 'soumis' && b.employee_id !== u.employee_id ? h`<button class="mini ok" data-act="need-dec" data-id="${b.id}" data-a="favorable">Favorable</button><button class="mini ko" data-act="need-dec" data-id="${b.id}" data-a="defavorable">Défavorable</button>` : ''}${isHr() && ['soumis', 'avis_favorable', 'avis_defavorable'].includes(b.statut) ? h`<button class="mini ok" data-act="need-dec" data-id="${b.id}" data-a="retenir">Retenir</button><button class="mini ko" data-act="need-dec" data-id="${b.id}" data-a="rejeter">Rejeter</button>` : ''}</td></tr>`)}${besoins.length ? '' : cancelRow(5)}</tbody></table></div></section>
   <section class="card"><h3>Catalogue des formations</h3><div class="tscroll"><table class="t"><thead><tr><th>Intitulé</th><th>Domaine</th><th>Dates</th><th>Durée</th><th>Formateur</th><th>Inscrits</th><th>Statut</th></tr></thead><tbody>
   ${list.map((t) => h`<tr><td>${isHr() ? h`<a href="#/formations/${t.id}">${t.titre}</a>` : t.titre}</td><td>${t.domaine}</td><td>${fmtDate(t.date_debut)} → ${fmtDate(t.date_fin)}</td><td>${t.heures} h</td><td>${t.formateur || '—'}</td><td>${t.inscrits} / ${t.capacite}</td><td>${badge(t.statut)}</td></tr>`)}</tbody></table></div></section>`);
 }
+actions['need-new'] = async () => {
+  const open = (await api('/trainings')).filter((t) => t.statut === 'planifiee');
+  forms['need-new'] = async (d) => { await api('/besoins', 'POST', d); closeModal(); toast('Besoin transmis'); refresh(); };
+  modal('Exprimer un besoin de formation', h`<form data-form="need-new">${field('Thème souhaité', 'theme', { required: true })}${field('Session du catalogue (facultatif)', 'training_id', { options: open.map((t) => [t.id, `${t.titre} — ${fmtDate(t.date_debut)}`]) })}${field('Justification', 'justification', { type: 'textarea' })}<div class="actions"><button type="button" class="ghost" data-act="close-modal">Annuler</button><button class="primary" type="submit">Envoyer</button></div></form>`);
+};
+actions['need-dec'] = (el) => {
+  const a = el.dataset.a; const go = (com) => api(`/besoins/${el.dataset.id}/decision`, 'POST', { action: a, commentaire: com });
+  if (a === 'rejeter' || a === 'defavorable') decisionModal({ title: a === 'rejeter' ? 'Ne pas retenir ce besoin' : 'Avis défavorable', label: 'Motif', required: a === 'rejeter', onSubmit: (d) => go(d.commentaire) });
+  else go().then(() => { toast('Enregistré'); refresh(); }).catch((e) => toast(e.message, 'ko'));
+};
 actions.enr = async (el) => { await api(`/enrollments/${el.dataset.id}/respond`, 'POST', { action: el.dataset.a }); toast('Réponse enregistrée'); refresh(); };
 actions.rate = async (el) => { await api(`/enrollments/${el.dataset.id}/evaluate`, 'POST', { note: Number(el.dataset.n) }); toast('Merci pour votre évaluation'); refresh(); };
 actions['train-new'] = () => {
@@ -119,7 +133,7 @@ export async function eservices(root) {
   ${isHr() ? h`<section class="card"><h3>Émettre pour un fonctionnaire</h3><p class="note">Sélectionnez un fonctionnaire pour émettre à sa place, ou laissez vide pour votre propre dossier.</p>${empPicker()}</section>` : ''}
   <div class="doc-tiles">${DOCS.map(([k, ic, l, s]) => h`<button class="doc-tile" data-act="doc-req" data-k="${k}" ${raw(!u.employee_id && !isHr() ? 'disabled' : '')}><span class="ic" aria-hidden="true">${ic}</span><b>${l}</b><small>${s}</small></button>`)}</div>
   <div class="card"><div class="tscroll"><table class="t"><thead><tr>${isHr() ? h`<th>Fonctionnaire</th>` : ''}<th>Document</th><th>Demandé le</th><th>Statut</th><th>Référence</th><th></th></tr></thead><tbody>
-  ${list.map((a) => h`<tr>${isHr() ? h`<td>${empLink(a)}</td>` : ''}<td>${DOCS.find((d) => d[0] === a.type)?.[2]}</td><td>${fmtDt(a.requested_at)}</td><td>${badge(a.statut)}${a.signed_at ? h`<br><small class="muted">${fmtDt(a.signed_at)}</small>` : ''}</td><td><code>${a.code}</code></td><td class="nowrap">${a.statut === 'signee' ? h`<a class="btn mini" href="/doc/${a.id}" target="_blank" rel="noopener">Télécharger / imprimer</a>` : isHr() ? h`<button class="mini ok" data-act="doc-sign" data-id="${a.id}">Signer</button>` : ''}</td></tr>`)}
+  ${list.map((a) => h`<tr>${isHr() ? h`<td>${empLink(a)}</td>` : ''}<td>${DOCS.find((d) => d[0] === a.type)?.[2]}</td><td>${fmtDt(a.requested_at)}</td><td>${badge(a.statut)}${a.signed_at ? h`<br><small class="muted">${fmtDt(a.signed_at)}</small>` : ''}</td><td><code>${a.code}</code></td><td class="nowrap">${a.statut === 'signee' ? h`<a class="btn mini primary" href="/doc/${a.id}.pdf">PDF</a><a class="btn mini" href="/doc/${a.id}" target="_blank" rel="noopener">Aperçu / imprimer</a>` : isHr() ? h`<button class="mini ok" data-act="doc-sign" data-id="${a.id}">Signer</button>` : ''}</td></tr>`)}
   ${list.length ? '' : cancelRow(6)}</tbody></table></div></div>`);
 }
 actions['doc-req'] = async (el) => {
