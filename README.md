@@ -9,7 +9,7 @@ docker compose up -d db   # PostgreSQL seul (ou utiliser votre serveur existant)
 npm install
 npm start              # http://localhost:3000 — schéma et données de démonstration créés au premier lancement
 npm run seed           # vide les tables et recharge les données fictives
-npm test               # 20 tests d'intégration, dans un schéma PostgreSQL jetable
+npm test               # 21 tests d'intégration, dans un schéma PostgreSQL jetable
 ```
 
 Si le port 5432 est déjà utilisé (PostgreSQL installé en local), lancer Docker sur un autre port : `SIGRH_DB_PORT=55432 docker compose up -d`, puis `DATABASE_URL=postgres://sigrh:sigrh@127.0.0.1:55432/sigrh` (PowerShell : `$env:SIGRH_DB_PORT=55432` et `$env:DATABASE_URL="…"`).
@@ -34,6 +34,9 @@ Comptes de démonstration (mot de passe `demo1234`) : `wali`, `drh`, `chef`, `ag
 | Besoin de formation | agent exprime le besoin (éventuellement lié à une session) → avis du chef → la DRH retient (convocation automatique si session choisie) ou rejette avec motif |
 | Absence | déclaration (chef/DRH) → justificatif de l'agent → validation/rejet DRH (impact direct sur le taux d'absentéisme) |
 
+## Documents PDF
+Les attestations, ordres de mission et titres de congé signés sont téléchargeables en **PDF** (`/doc/<id>.pdf`) et en aperçu imprimable (`/doc/<id>`). Chaque document porte un **QR code** pointant vers `/verify/<code>`, page publique qui confirme l'authenticité (sans salaire ni donnée sensible). Définir `PUBLIC_URL` (ex. `https://sigrh.wilaya-dakhla.ma`) pour que les QR codes pointent vers l'adresse publique ; à défaut, l'adresse de la requête est utilisée.
+
 ## Déploiement
 `docker compose up -d --build` lance PostgreSQL et l'application (http://localhost:3000). Le `Dockerfile` construit l'image Node ; la CI GitHub (`.github/workflows/ci.yml`) exécute les tests sur un PostgreSQL de service puis construit l'image. Variables : `POSTGRES_PASSWORD`, `SIGRH_DB_PORT`, `SIGRH_APP_PORT`. **Changer le mot de passe par défaut et mettre un reverse proxy HTTPS devant l'application en production** ; le Dockerfile et le compose n'ont pas pu être exécutés dans l'environnement de développement (pas de démon Docker).
 
@@ -53,7 +56,6 @@ Le schéma est dans `server/db.js` (création idempotente au démarrage, pas enc
 
 ## Non réalisé par rapport au cahier des charges d'architecture
 - **Keycloak / OIDC (SSO, JWT)** : l'authentification reste locale (mots de passe hachés scrypt, session par cookie). L'intégrer demande un serveur Keycloak et le mappage des rôles (`ROLE_WALI`, `ROLE_DRH`…) vers `wali/drh/chef/fonctionnaire` : à faire séparément.
-- **PDF avec QR code** : les documents sont des pages HTML imprimables avec code de vérification.
 - **Téléversement de justificatifs** : la justification d'absence est un texte (référence du certificat), pas un fichier.
 - Pile Angular / FastAPI : non utilisée (voir plus haut).
 

@@ -8,7 +8,7 @@ const U = require('./util');
 const R = require('./rules');
 const { dashboard } = require('./kpi');
 const copilot = require('./copilot');
-const { renderDocument, renderVerify } = require('./documents');
+const { renderDocument, renderPdf, renderVerify } = require('./documents');
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const bad = (m) => new HttpError(400, m);
@@ -446,7 +446,7 @@ function createApp(db) {
 
   // ---------- Pages HTML (documents imprimables, vérification publique)
   const pages = {
-    doc: async (c, id) => { const a = await one('SELECT * FROM attestations WHERE id=?', id); if (!a) throw notFound(); if (c.user.role !== 'drh' && a.employee_id !== c.user.employee_id) throw forbidden(); if (a.statut !== 'signee') throw new HttpError(409, "Document non encore signé"); const e = await one('SELECT e.*, s.nom service, s.division FROM employees e LEFT JOIN services s ON s.id=e.service_id WHERE e.id=?', a.employee_id); return renderDocument(a, e, { salaire: R.salaireBrut(e), host: c.origin }); },
+    doc: async (c, id, pdf) => { const a = await one('SELECT * FROM attestations WHERE id=?', id); if (!a) throw notFound(); if (c.user.role !== 'drh' && a.employee_id !== c.user.employee_id) throw forbidden(); if (a.statut !== 'signee') throw new HttpError(409, "Document non encore signé"); const e = await one('SELECT e.*, s.nom service, s.division FROM employees e LEFT JOIN services s ON s.id=e.service_id WHERE e.id=?', a.employee_id); return (pdf ? renderPdf : renderDocument)(a, e, { salaire: R.salaireBrut(e), host: c.origin }); },
     verify: async (c, code) => { const a = await one('SELECT x.*, e.nom, e.prenom FROM attestations x JOIN employees e ON e.id=x.employee_id WHERE x.code=?', code); return renderVerify(a ? { ...a, label: ATT[a.type] } : null); },
   };
 
@@ -480,6 +480,7 @@ function createApp(db) {
         throw notFound('Route inconnue');
       }
       let m;
+      if ((m = /^\/doc\/(\d+)\.pdf$/.exec(p))) { if (!user) throw new HttpError(401, 'Authentification requise'); const buf = await pages.doc({ user, origin }, Number(m[1]), true); return send(res, 200, buf, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="sigrh-document-${m[1]}.pdf"`, 'Cache-Control': 'no-store' }); }
       if ((m = /^\/doc\/(\d+)$/.exec(p))) { if (!user) throw new HttpError(401, 'Authentification requise'); return send(res, 200, await pages.doc({ user, origin }, Number(m[1])), { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); }
       if ((m = /^\/verify\/([A-Z0-9-]{4,20})$/.exec(p))) return send(res, 200, await pages.verify({}, m[1]), { 'Content-Type': 'text/html; charset=utf-8' });
       // fichiers statiques

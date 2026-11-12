@@ -17,7 +17,8 @@ test.after(async () => { server.close(); await dropSchema(db); });
 async function as(user) {
   const r = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: 'demo1234' }) });
   const cookie = r.headers.get('set-cookie').split(';')[0];
-  return async (path, method = 'GET', body) => { const x = await fetch(base + '/api' + path, { method, headers: { cookie, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body || {}) }); return { status: x.status, body: await x.json().catch(() => null) }; };
+  const call = async (path, method = 'GET', body) => { const x = await fetch(base + '/api' + path, { method, headers: { cookie, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body || {}) }); return { status: x.status, body: await x.json().catch(() => null) }; };
+  call.cookie = cookie; return call;
 }
 
 test('workdays exclut week-ends et fériés', () => { assert.equal(U.workdays('2026-11-02', '2026-11-08'), 4); /* 6 nov férié */ });
@@ -140,4 +141,15 @@ test('besoin de formation : agent -> chef -> DRH (convocation)', async () => {
   const r2 = await a('/besoins', 'POST', { theme: 'Excel' }); assert.equal((await c(`/besoins/${r2.body.id}/decision`, 'POST', { action: 'favorable', commentaire: 'Utile' })).status, 200);
   assert.equal((await d(`/besoins/${r2.body.id}/decision`, 'POST', { action: 'rejeter' })).status, 400);
   assert.equal((await d(`/besoins/${r2.body.id}/decision`, 'POST', { action: 'rejeter', commentaire: 'Budget' })).status, 200);
+});
+
+test('documents : PDF signé avec QR code, contrôle d\'accès', async () => {
+  const a = await as('agent'), c = await as('chef'); const t = (await a('/attestations', 'POST', { type: 'travail' })).body;
+  const id = (await a('/attestations')).body.find((x) => x.code === t.code).id;
+  const r = await fetch(`${base}/doc/${id}.pdf`, { headers: { cookie: a.cookie } }); assert.equal(r.status, 200); assert.equal(r.headers.get('content-type'), 'application/pdf');
+  const buf = Buffer.from(await r.arrayBuffer()); assert.equal(buf.subarray(0, 5).toString(), '%PDF-'); assert.ok(buf.length > 2000);
+  assert.equal((await fetch(`${base}/doc/${id}.pdf`, { headers: { cookie: c.cookie } })).status, 403); assert.equal((await fetch(`${base}/doc/${id}.pdf`)).status, 401);
+  const html = await (await fetch(`${base}/doc/${id}`, { headers: { cookie: a.cookie } })).text(); assert.match(html, /<svg/); assert.ok(html.includes(`/verify/${t.code}`)); assert.ok(html.includes(`/doc/${id}.pdf`));
+  const m = (await a('/attestations', 'POST', { type: 'mission', destination: 'Rabat', objet: 'Réunion', date_debut: U.today(), date_fin: U.today() })).body;
+  assert.equal((await fetch(`${base}/doc/${m.id}.pdf`, { headers: { cookie: a.cookie } })).status, 409); // non signé
 });
