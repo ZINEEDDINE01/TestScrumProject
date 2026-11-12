@@ -132,7 +132,7 @@ function createApp(db) {
       ...e, ancienneté_ans: Math.round(U.yearsBetween(e.date_recrutement, at) * 10) / 10, age: Math.floor(U.yearsBetween(e.date_naissance, at)),
       date_retraite: U.addMonths(e.date_naissance, R.AGE_RETRAITE * 12), eligibilite: R.eligibility(e, rules, at), heures_formation_annee: heures,
       heures_formation_total: (await one("SELECT COALESCE(SUM(t.heures),0) h FROM enrollments n JOIN trainings t ON t.id=n.training_id WHERE n.employee_id=? AND n.statut='present'", id)).h,
-      promotions: await q('SELECT * FROM promotions WHERE employee_id=? ORDER BY opened_at DESC', id), est_chef: e.chef_id === e.id,
+      promotions: await q('SELECT * FROM promotions WHERE employee_id=? ORDER BY opened_at DESC', id), evaluations: await q('SELECT annee,note,objectifs_pct,appreciation,statut,saisi_par,decided_at FROM evaluations WHERE employee_id=? ORDER BY annee DESC', id), est_chef: e.chef_id === e.id,
       onboarding: e.onboarding ? JSON.parse(e.onboarding) : null,
     };
     if (c.user.role === 'drh' || c.user.employee_id === id) out.salaire_base = R.salaireBrut(e); // donnée sensible
@@ -288,6 +288,7 @@ function createApp(db) {
     const p = await one('SELECT * FROM promotions WHERE id=?', Number(c.params.id)); if (!p) throw notFound(); if (p.statut !== 'propose') throw new HttpError(409, 'Décision déjà prise');
     const act = oneOf(c.body.action, ['valider', 'rejeter'], 'Action'); const ref = reqStr(c.body.ref_decision || (act === 'valider' ? '' : 'Non retenu'), 'Référence de la décision', 120);
     const e = await one('SELECT * FROM employees WHERE id=?', p.employee_id);
+    if (act === 'valider' && p.type === 'grade' && !(await one("SELECT 1 FROM evaluations WHERE employee_id=? AND annee=? AND statut='validee'", p.employee_id, p.annee))) throw new HttpError(422, `Avancement de grade impossible : évaluation ${p.annee} non validée`);
     if (act === 'valider') {
       const cur = p.type === 'echelon' ? String(e.echelon) : e.grade; if (cur !== p.de_valeur) throw new HttpError(409, "La situation du fonctionnaire a changé depuis la proposition");
       await R.applyPromotion(db, p); await run("UPDATE promotions SET statut='valide', ref_decision=?, decided_at=? WHERE id=?", ref, U.today(), p.id);
@@ -301,6 +302,66 @@ function createApp(db) {
     return await R.loadRules(db);
   }));
   route('POST', '/api/caps', ['drh'], async (c) => ({ id: Number((await run('INSERT INTO caps (date_session,objet,statut) VALUES (?,?,?)', reqDate(c.body.date_session, 'Date'), reqStr(c.body.objet, 'Objet'), 'planifiee')).lastInsertRowid) }));
+
+  // ---------- Évaluation annuelle (circuit : DRH éligibilité -> chef note -> DRH valide)
+  const noteOk = (b) => { const note = Number(b.note), obj = Number(b.objectifs_pct); if (!(note >= 0 && note <= 20)) throw bad('Note de 0 à 20'); if (!(obj >= 0 && obj <= 100)) throw bad('Objectifs réalisés : 0 à 100 %'); return { note, obj }; };
+  route('GET', '/api/evaluations', ['drh', 'chef', 'fonctionnaire'], async (c) => {
+    const w = [inClause(await scopeIds(c.user)).replace('employee_id', 'x.employee_id')]; const p = [];
+    if (c.query.annee) { w.push('x.annee=?'); p.push(Number(c.query.annee)); } if (c.query.statut) { w.push('x.statut=?'); p.push(c.query.statut); }
+    return q(`SELECT x.*, ${EMP_COLS} FROM evaluations x ${withEmp} WHERE ${w.join(' AND ')} ORDER BY x.annee DESC, x.created_at DESC LIMIT 500`, ...p);
+  });
+  route('GET', '/api/evaluations/manquantes', ['drh', 'chef'], async (c) => {
+    const annee = Number(U.today().slice(0, 4)); const ids = await scopeIds(c.user); const own = c.user.employee_id;
+    return q(`SELECT e.id, ${EMP_COLS}, (SELECT COUNT(*) FROM promotions p WHERE p.employee_id=e.id AND p.statut='propose' AND p.type='grade') AS grade_propose
+      FROM employees e LEFT JOIN services s ON s.id=e.service_id WHERE e.statut='actif' AND ${inClause(ids).replace('employee_id', 'e.id')} AND e.id<>? AND NOT EXISTS (SELECT 1 FROM evaluations v WHERE v.employee_id=e.id AND v.annee=?) ORDER BY grade_propose DESC, e.nom LIMIT 200`, own || 0, annee);
+  });
+  route('POST', '/api/evaluations', ['drh', 'chef'], async (c) => {
+    const eid = Number(c.body.employee_id); const e = await one("SELECT * FROM employees WHERE id=? AND statut='actif'", eid); if (!e) throw notFound('Fonctionnaire introuvable');
+    if (c.user.role === 'chef' && !(await isChefOf(c.user, eid))) throw forbidden(); if (eid === c.user.employee_id) throw new HttpError(403, 'Vous ne pouvez pas vous noter vous-même');
+    const { note, obj } = noteOk(c.body); const annee = Number(c.body.annee) || Number(U.today().slice(0, 4)); if (annee < 2000 || annee > Number(U.today().slice(0, 4))) throw bad('Année invalide');
+    const ex = await one('SELECT * FROM evaluations WHERE employee_id=? AND annee=?', eid, annee); if (ex && ex.statut === 'validee') throw new HttpError(409, 'Évaluation déjà validée');
+    const app = c.body.appreciation ? String(c.body.appreciation).slice(0, 600) : null;
+    if (ex) await run("UPDATE evaluations SET note=?, objectifs_pct=?, appreciation=?, statut='saisie', saisi_par=?, commentaire_drh=NULL WHERE id=?", note, obj, app, c.user.nom_affichage, ex.id);
+    else await run("INSERT INTO evaluations (employee_id,annee,note,objectifs_pct,appreciation,statut,saisi_par,created_at) VALUES (?,?,?,?,?,'saisie',?,?)", eid, annee, note, obj, app, c.user.nom_affichage, nowIso());
+    await notifyDrh(`Évaluation ${annee} saisie pour ${e.prenom} ${e.nom} : validation requise.`, '#/evaluations'); return { ok: true };
+  });
+  route('POST', '/api/evaluations/:id/decision', ['drh'], async (c) => {
+    const v = await one('SELECT * FROM evaluations WHERE id=?', Number(c.params.id)); if (!v) throw notFound(); if (v.statut !== 'saisie') throw new HttpError(409, 'Évaluation non en attente de validation');
+    const act = oneOf(c.body.action, ['valider', 'renvoyer'], 'Action'); const com = c.body.commentaire ? String(c.body.commentaire).slice(0, 300) : null; if (act === 'renvoyer' && !com) throw bad('Motif requis');
+    await run('UPDATE evaluations SET statut=?, commentaire_drh=?, decided_at=? WHERE id=?', act === 'valider' ? 'validee' : 'a_revoir', com, nowIso(), v.id);
+    if (act === 'valider') await notifyEmployee(v.employee_id, `Votre évaluation ${v.annee} a été validée (note : ${v.note}/20).`, '#/mon-dossier');
+    else await notifyChefOf(v.employee_id, `Évaluation ${v.annee} renvoyée par la DRH : ${com}`, '#/evaluations');
+    return { ok: true };
+  });
+
+  // ---------- Besoins de formation (circuit : agent -> chef -> DRH)
+  route('GET', '/api/besoins', ['drh', 'chef', 'fonctionnaire'], async (c) =>
+    q(`SELECT x.*, ${EMP_COLS}, t.titre training FROM besoins_formation x ${withEmp} LEFT JOIN trainings t ON t.id=x.training_id WHERE ${inClause(await scopeIds(c.user)).replace('employee_id', 'x.employee_id')} ORDER BY x.created_at DESC LIMIT 300`));
+  route('POST', '/api/besoins', ['drh', 'chef', 'fonctionnaire'], async (c) => {
+    const eid = c.user.employee_id; if (!eid) throw bad('Aucun dossier fonctionnaire associé'); const theme = reqStr(c.body.theme, 'Thème', 150);
+    let tid = null; if (c.body.training_id) { const t = await one("SELECT id FROM trainings WHERE id=? AND statut='planifiee'", Number(c.body.training_id)); if (!t) throw bad('Session inconnue ou non ouverte'); tid = t.id; }
+    if (await one("SELECT 1 FROM besoins_formation WHERE employee_id=? AND statut IN ('soumis','avis_favorable','avis_defavorable') AND LOWER(theme)=LOWER(?)", eid, theme)) throw new HttpError(409, 'Un besoin identique est déjà en cours');
+    const isChef = await one('SELECT 1 FROM services WHERE chef_id=?', eid);
+    const id = Number((await run('INSERT INTO besoins_formation (employee_id,theme,justification,training_id,statut,created_at) VALUES (?,?,?,?,?,?)', eid, theme, c.body.justification ? String(c.body.justification).slice(0, 500) : null, tid, 'soumis', nowIso())).lastInsertRowid);
+    if (isChef || c.user.role === 'drh') await notifyDrh(`Besoin de formation exprimé : ${theme}.`, '#/formations'); else await notifyChefOf(eid, `Besoin de formation exprimé par ${c.user.nom_affichage} : avis requis.`, '#/formations');
+    return { id };
+  });
+  route('POST', '/api/besoins/:id/decision', ['drh', 'chef'], async (c) => tx(db, async () => {
+    const b = await one('SELECT * FROM besoins_formation WHERE id=?', Number(c.params.id)); if (!b) throw notFound(); const com = c.body.commentaire ? String(c.body.commentaire).slice(0, 300) : null; const act = c.body.action;
+    if (act === 'favorable' || act === 'defavorable') {
+      if (c.user.role !== 'chef' || !(await isChefOf(c.user, b.employee_id)) || b.statut !== 'soumis') throw forbidden();
+      await run('UPDATE besoins_formation SET statut=?, commentaire_chef=? WHERE id=?', act === 'favorable' ? 'avis_favorable' : 'avis_defavorable', com, b.id); await notifyDrh(`Avis ${act} du chef sur un besoin de formation : ${b.theme}.`, '#/formations'); return { ok: true };
+    }
+    if (c.user.role !== 'drh') throw forbidden(); if (!['soumis', 'avis_favorable', 'avis_defavorable'].includes(b.statut)) throw new HttpError(409, 'Besoin déjà traité');
+    if (act === 'retenir') {
+      let msg = `Votre besoin de formation « ${b.theme} » est retenu dans le plan de formation.`;
+      if (b.training_id) { const t = await one('SELECT * FROM trainings WHERE id=?', b.training_id); const ins = (await one('SELECT COUNT(*) n FROM enrollments WHERE training_id=?', t.id)).n; if (ins >= t.capacite) throw new HttpError(422, 'Session complète'); await run("INSERT INTO enrollments (training_id,employee_id,statut,convoque_at) VALUES (?,?,'convoque',?) ON CONFLICT (training_id,employee_id) DO NOTHING", t.id, b.employee_id, nowIso()); msg = `Besoin retenu : vous êtes convoqué(e) à « ${t.titre} ». Merci de confirmer votre présence.`; }
+      await run("UPDATE besoins_formation SET statut='retenu', commentaire_drh=?, decided_at=? WHERE id=?", com, nowIso(), b.id); await notifyEmployee(b.employee_id, msg, '#/formations');
+    } else if (act === 'rejeter') {
+      if (!com) throw bad('Motif requis'); await run("UPDATE besoins_formation SET statut='rejete', commentaire_drh=?, decided_at=? WHERE id=?", com, nowIso(), b.id); await notifyEmployee(b.employee_id, `Votre besoin de formation « ${b.theme} » n'a pas été retenu : ${com}`, '#/formations');
+    } else throw bad('Action inconnue');
+    return { ok: true };
+  }));
 
   // ---------- Formation
   const trainingRows = async (c) => {

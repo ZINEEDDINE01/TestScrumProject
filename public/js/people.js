@@ -42,6 +42,7 @@ export async function employee(root, id) {
       <p class="big-n">${num(e.solde_conges, 1)} <small>jours de congé restants</small></p>${meter(Math.max(0, e.solde_conges), 30, 'Solde de congés')}
       <p class="big-n" style="margin-top:18px">${num(e.heures_formation_annee, 0)} h <small>de formation suivies en ${state.today.slice(0, 4)} (${num(e.heures_formation_total)} h au total)</small></p></section>
   </div>
+  ${e.evaluations?.length ? h`<section class="card"><h3>Évaluations annuelles</h3><table class="t"><thead><tr><th>Année</th><th>Note</th><th>Objectifs</th><th>Appréciation</th><th>Statut</th></tr></thead><tbody>${e.evaluations.map((v) => h`<tr><td>${v.annee}</td><td><b>${v.note}</b> / 20</td><td>${num(v.objectifs_pct)} %</td><td>${v.appreciation || '—'}<br><small class="muted">${v.saisi_par || ''}</small></td><td>${badge('ev_' + v.statut)}</td></tr>`)}</tbody></table></section>` : ''}
   ${e.onboarding ? h`<section class="card"><h3>Parcours d'intégration (prise de service)</h3><ul class="plain check">${e.onboarding.map((o, i) => h`<li><label><input type="checkbox" data-act="onb" data-id="${e.id}" data-i="${i}" ${raw(o.done ? 'checked' : '')} ${raw(isHr() ? '' : 'disabled')}> ${o.label}</label></li>`)}</ul></section>` : ''}`);
 }
 actions.onb = async (el) => { await api(`/employees/${el.dataset.id}/onboarding`, 'POST', { index: Number(el.dataset.i), done: el.checked }); };

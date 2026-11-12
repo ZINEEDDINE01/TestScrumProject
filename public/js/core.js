@@ -28,6 +28,8 @@ const STATUTS = {
   propose: ['À décider', 'warn'], en_attente: ['À signer', 'warn'], signee: ['Signé', 'ok'],
   planifiee: ['Planifiée', 'info'], en_cours: ['En cours', 'ok'], terminee: ['Terminée', 'muted'], annulee: ['Annulée', 'muted'],
   convoque: ['Convoqué(e)', 'warn'], confirme: ['Présence confirmée', 'ok'], decline: ['Désistement', 'ko'], present: ['Présent(e)', 'ok'], absent: ['Absent(e)', 'ko'],
+  ev_saisie: ['Saisie — à valider', 'warn'], ev_validee: ['Validée', 'ok'], ev_a_revoir: ['À revoir', 'ko'],
+  bs_soumis: ['Avis du chef attendu', 'warn'], bs_avis_favorable: ['Avis favorable — décision DRH', 'info'], bs_avis_defavorable: ['Avis défavorable — décision DRH', 'warn'], bs_retenu: ['Retenu au plan', 'ok'], bs_rejete: ['Non retenu', 'ko'],
   candidature: ['Candidature', 'info'], emise: ['Offre émise', 'warn'], acceptee: ['Acceptée', 'ok'], refusee: ['Refusée', 'ko'],
 };
 const ICON = { ok: '✔', warn: '▲', ko: '✖', info: 'ℹ', muted: '•' };

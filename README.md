@@ -5,11 +5,11 @@ Prototype fonctionnel du SIGRH et du tableau de bord exécutif de la **Wilaya de
 **Pile** : Node ≥ 20, **PostgreSQL ≥ 14** (pilote `pg`), front en JavaScript natif.
 
 ```bash
-docker compose up -d   # PostgreSQL (ou utiliser votre serveur existant)
+docker compose up -d db   # PostgreSQL seul (ou utiliser votre serveur existant)
 npm install
 npm start              # http://localhost:3000 — schéma et données de démonstration créés au premier lancement
 npm run seed           # vide les tables et recharge les données fictives
-npm test               # 17 tests d'intégration, dans un schéma PostgreSQL jetable
+npm test               # 20 tests d'intégration, dans un schéma PostgreSQL jetable
 ```
 
 Si le port 5432 est déjà utilisé (PostgreSQL installé en local), lancer Docker sur un autre port : `SIGRH_DB_PORT=55432 docker compose up -d`, puis `DATABASE_URL=postgres://sigrh:sigrh@127.0.0.1:55432/sigrh` (PowerShell : `$env:SIGRH_DB_PORT=55432` et `$env:DATABASE_URL="…"`).
@@ -26,6 +26,17 @@ Comptes de démonstration (mot de passe `demo1234`) : `wali`, `drh`, `chef`, `ag
 | **Chef de service** | Équipe, avis sur les congés, déclaration d'absences, alertes |
 | **Fonctionnaire** | Dossier, solde de congés, demandes, justification d'absence, éligibilité à l'avancement, invitations de formation (confirmation, heures cumulées, évaluation), attestations de travail / salaire, ordre de mission, titre de congé |
 
+## Circuits de validation
+| Circuit | Étapes |
+|---|---|
+| Congé | agent → avis du chef (favorable / défavorable) → validation finale DRH (solde mis à jour) |
+| Évaluation annuelle | chef saisit la note et l'appréciation → DRH valide ou renvoie avec motif → visible par l'agent. Pas d'auto-évaluation. Une note validée de l'année est **requise pour valider un avancement de grade** |
+| Besoin de formation | agent exprime le besoin (éventuellement lié à une session) → avis du chef → la DRH retient (convocation automatique si session choisie) ou rejette avec motif |
+| Absence | déclaration (chef/DRH) → justificatif de l'agent → validation/rejet DRH (impact direct sur le taux d'absentéisme) |
+
+## Déploiement
+`docker compose up -d --build` lance PostgreSQL et l'application (http://localhost:3000). Le `Dockerfile` construit l'image Node ; la CI GitHub (`.github/workflows/ci.yml`) exécute les tests sur un PostgreSQL de service puis construit l'image. Variables : `POSTGRES_PASSWORD`, `SIGRH_DB_PORT`, `SIGRH_APP_PORT`. **Changer le mot de passe par défaut et mettre un reverse proxy HTTPS devant l'application en production** ; le Dockerfile et le compose n'ont pas pu être exécutés dans l'environnement de développement (pas de démon Docker).
+
 ## Copilote décisionnel (`server/copilot.js`)
 File de recommandations priorisée (haute / moyenne / optimisation) affichée en carrousel sur le tableau de bord du Wali et de la DRH, avec **Valider & exécuter**, **Ajuster** et **Ignorer**. Quatre règles : pic d'absentéisme d'une entité (renfort temporaire avec retour automatique), avancements de grade en attente (convocation de la CAP), couverture de formation des annexes et caïdats (convocations), départs à la retraite à remplacer (ouverture de postes). Chaque fiche indique sa méthode de calcul ; seuils dans `SEUILS`. Toute décision est journalisée (table `ai_decisions`) et jamais exécutée sans validation.
 
@@ -39,6 +50,12 @@ Les formules du cahier des charges (absentéisme, turnover, rétention, promotio
 
 ## Base de données
 Le schéma est dans `server/db.js` (création idempotente au démarrage, pas encore de migrations versionnées). Les dates sont stockées en `TEXT` ISO (`AAAA-MM-JJ`) pour rester comparables lexicalement ; à passer en `DATE`/`TIMESTAMPTZ` si la base est exploitée par d'autres outils. Les transactions utilisent un client dédié (`tx`).
+
+## Non réalisé par rapport au cahier des charges d'architecture
+- **Keycloak / OIDC (SSO, JWT)** : l'authentification reste locale (mots de passe hachés scrypt, session par cookie). L'intégrer demande un serveur Keycloak et le mappage des rôles (`ROLE_WALI`, `ROLE_DRH`…) vers `wali/drh/chef/fonctionnaire` : à faire séparément.
+- **PDF avec QR code** : les documents sont des pages HTML imprimables avec code de vérification.
+- **Téléversement de justificatifs** : la justification d'absence est un texte (référence du certificat), pas un fichier.
+- Pile Angular / FastAPI : non utilisée (voir plus haut).
 
 ## Limites connues
 - Les **QR codes** des documents ne sont pas générés : chaque document porte un code de référence vérifiable sur `/verify/<code>`.

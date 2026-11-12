@@ -88,6 +88,17 @@ CREATE TABLE IF NOT EXISTS affectations_temporaires (
   id SERIAL PRIMARY KEY, employee_id INTEGER NOT NULL REFERENCES employees(id), service_origine INTEGER NOT NULL,
   service_accueil INTEGER NOT NULL, date_debut TEXT NOT NULL, date_fin TEXT NOT NULL, decision_id INTEGER, statut TEXT NOT NULL DEFAULT 'en_cours'
 );
+CREATE TABLE IF NOT EXISTS evaluations (
+  id SERIAL PRIMARY KEY, employee_id INTEGER NOT NULL REFERENCES employees(id), annee INTEGER NOT NULL,
+  note DOUBLE PRECISION NOT NULL, objectifs_pct DOUBLE PRECISION NOT NULL, appreciation TEXT,
+  statut TEXT NOT NULL DEFAULT 'saisie', saisi_par TEXT, commentaire_drh TEXT, created_at TEXT NOT NULL, decided_at TEXT,
+  UNIQUE (employee_id, annee)
+);
+CREATE TABLE IF NOT EXISTS besoins_formation (
+  id SERIAL PRIMARY KEY, employee_id INTEGER NOT NULL REFERENCES employees(id), theme TEXT NOT NULL, justification TEXT,
+  training_id INTEGER REFERENCES trainings(id), statut TEXT NOT NULL DEFAULT 'soumis', commentaire_chef TEXT, commentaire_drh TEXT,
+  created_at TEXT NOT NULL, decided_at TEXT
+);
 CREATE INDEX IF NOT EXISTS ix_leaves_emp ON leaves(employee_id);
 CREATE INDEX IF NOT EXISTS ix_abs_emp ON absences(employee_id);
 CREATE INDEX IF NOT EXISTS ix_enr_emp ON enrollments(employee_id);

@@ -1,0 +1,43 @@
+name: CI - SIGRH
+
+on:
+  push:
+    branches: [main, develop, "claude/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests (Node + PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sigrh
+          POSTGRES_PASSWORD: sigrh
+          POSTGRES_DB: sigrh
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sigrh -d sigrh"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sigrh:sigrh@localhost:5432/sigrh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Audit des dépendances
+        run: npm audit --omit=dev --audit-level=high
+
+  docker:
+    name: Construction de l'image Docker
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t sigrh:ci .

@@ -1,12 +1,29 @@
-# PostgreSQL pour le développement : docker compose up -d
+# Développement / démonstration : docker compose up -d --build   →   http://localhost:3000
+# Seul PostgreSQL : docker compose up -d db   (puis npm start avec DATABASE_URL)
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: sigrh
-      POSTGRES_PASSWORD: sigrh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sigrh}
       POSTGRES_DB: sigrh
-    ports: ["${SIGRH_DB_PORT:-5432}:5432"]  # port hôte modifiable si 5432 est déjà pris
+    ports: ["${SIGRH_DB_PORT:-5432}:5432"]   # port hôte modifiable si 5432 est déjà pris
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sigrh -d sigrh"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://sigrh:${POSTGRES_PASSWORD:-sigrh}@db:5432/sigrh
+      PORT: "3000"
+    ports: ["${SIGRH_APP_PORT:-3000}:3000"]
+    depends_on:
+      db:
+        condition: service_healthy
 volumes:
   pgdata:
