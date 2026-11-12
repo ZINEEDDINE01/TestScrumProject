@@ -18,6 +18,9 @@ const FORMULES = [
   { id: 'delai', nom: 'Délai de recrutement', formule: "Σ (Date d'acceptation de l'offre − Date de candidature) / Nombre d'embauches", note: 'En jours calendaires.' },
   { id: 'acceptation', nom: "Taux d'acceptation des offres", formule: '(Offres acceptées / Offres émises) × 100', note: "Offres émises dans l'année (en cours incluses)." },
   { id: 'heures', nom: 'Heures de formation par fonctionnaire', formule: "Nombre total d'heures de formation / Nombre d'employés à temps plein", note: "Heures effectivement suivies (présence émargée) sur l'année." },
+  { id: 'avanc', nom: "Taux d'avancement de grade / d'échelon", formule: 'T_avanc = (Fonctionnaires promus / Éligibles CAP) × 100', note: "Année en cours ; éligibles = dossiers d'avancement ouverts (validés, rejetés, en attente)." },
+  { id: 'form', nom: 'Taux de couverture des formations', formule: 'T_form = (Fonctionnaires formés / Effectif total Wilaya + annexes) × 100', note: 'Formés = au moins une formation suivie (présence émargée) dans l\'année.' },
+  { id: 'encad', nom: "Ratio d'encadrement", formule: "R_encad = (Cadres et ingénieurs / Effectif total) × 100", note: 'Cadres et ingénieurs = corps Administrateur et Ingénieur.' },
   { id: 'attrition12', nom: "Taux d'attrition sur 1 an", formule: "(Employés ayant quitté dans l'année / Effectif total pendant l'année) × 100", note: "12 mois glissants ; effectif total = effectif d'il y a 12 mois + embauches de la période." },
   { id: 'ratiorh', nom: 'Ratio RH / employé', formule: "Nombre total de personnel RH / Nombre total d'employés", note: 'Personnel RH = agents de la Division des Ressources Humaines.' },
   { id: 'retention12', nom: 'Taux de rétention sur 1 an', formule: '(Employés restés 1 an / Total des embauches pendant la période) × 100', note: "Cohorte des embauches de la période [−24 mois ; −12 mois], vérifiée un an après leur prise de service." },
@@ -30,6 +33,7 @@ function dashboard(db, today = U.today()) {
   const eff = (d) => count(all, (e) => e.date_recrutement <= d && (!e.date_depart || e.date_depart > d));
   const leaves = db.prepare("SELECT * FROM leaves WHERE statut='valide'").all();
   const abs = db.prepare('SELECT * FROM absences').all();
+  const byId = new Map(all.map((e) => [e.id, e]));
   const age = (e, at = today) => U.yearsBetween(e.date_naissance, at);
 
   // ---- Assiduité
@@ -49,6 +53,9 @@ function dashboard(db, today = U.today()) {
   const svcMap = new Map();
   for (const e of act) { const k = e.service_id; const s = svcMap.get(k) || { service: e.service, division: e.division, localisation: e.localisation, effectif: 0, presents: 0 }; s.effectif++; if (!absentToday.has(e.id)) s.presents++; svcMap.set(k, s); }
   const couverture = [...svcMap.values()].map((s) => ({ ...s, taux: pct(s.presents, s.effectif, 0) })).sort((a, b) => a.taux - b.taux || a.service.localeCompare(b.service));
+  const w30 = [U.addDays(today, -29), today]; const jo30 = U.workdays(w30[0], w30[1]);
+  const absBySvc = new Map(); for (const x of abs) { const e = byId.get(x.employee_id); if (!e || e.statut !== 'actif') continue; absBySvc.set(e.service_id, (absBySvc.get(e.service_id) || 0) + U.overlapWork(x.date_debut, x.date_fin, w30[0], w30[1])); }
+  const parEntite = [...svcMap].map(([id, s]) => ({ service: s.service, division: s.division, effectif: s.effectif, jours: absBySvc.get(id) || 0, taux: pct(absBySvc.get(id) || 0, s.effectif * jo30, 2) })).filter((x) => x.effectif >= 5).sort((a, b) => b.taux - a.taux);
   const presentsToday = act.length - count(act, (e) => absentToday.has(e.id));
   const soldeMoyen = avg(act.map((e) => e.solde_conges));
 
@@ -68,6 +75,7 @@ function dashboard(db, today = U.today()) {
     byCorps: rows(group(act, (e) => e.corps)),
     pyramide, retraites: retraitesCum, anciennete: anc,
     feminisation: pct(count(act, (e) => e.sexe === 'F'), act.length), femmes: count(act, (e) => e.sexe === 'F'), hommes: count(act, (e) => e.sexe === 'H'),
+    encadrement_pct: pct(count(act, (e) => e.corps === 'Administrateur' || e.corps === 'Ingénieur'), act.length), cadres_ing: count(act, (e) => e.corps === 'Administrateur' || e.corps === 'Ingénieur'),
     cadres_sup: count(act, (e) => e.cadre_sup), cadres_sup_pct: pct(count(act, (e) => e.cadre_sup), act.length),
     cadres_femmes_pct: pct(count(act, (e) => e.cadre_sup && e.sexe === 'F'), count(act, (e) => e.cadre_sup)),
     age_moyen: avg(act.map((e) => age(e))), anciennete_moyenne: avg(act.map((e) => U.yearsBetween(e.date_recrutement, today))),
@@ -157,7 +165,7 @@ function dashboard(db, today = U.today()) {
   return {
     as_of: today, annee: Y,
     entete: { effectif: act.length, presence_mois: mois.presence, presents_aujourdhui: presentsToday, taux_presence_aujourdhui: pct(presentsToday, act.length), sessions_en_cours: formation.sessions_en_cours, inscrits_en_cours: formation.inscrits_en_cours },
-    effectifs, assiduite: { mois, annee, trend, solde_moyen: soldeMoyen, couverture, absents_aujourdhui: act.length - presentsToday },
+    effectifs, assiduite: { mois, annee, trend, par_entite: parEntite.slice(0, 10), solde_moyen: soldeMoyen, couverture, absents_aujourdhui: act.length - presentsToday },
     rh, recrutement, carriere, formation, eservices, formules: FORMULES,
   };
 }

@@ -75,3 +75,26 @@ test('convocation et confirmation de formation', async () => {
   assert.ok(me);
 });
 test('pas de fuite de traversée de chemin', async () => { assert.equal((await fetch(base + '/..%2fserver/db.js')).status, 404); });
+
+test('copilote : file priorisée, accès réservé, exécution après validation', async () => {
+  const w = await as('wali'), a = await as('agent');
+  assert.equal((await a('/copilot/decisions')).status, 403);
+  const l = await w('/copilot/decisions'); assert.equal(l.status, 200); assert.ok(l.body.length >= 3);
+  assert.equal(l.body[0].priorite, 'HAUTE'); const ranks = l.body.map((x) => x.priorite_info.rang); assert.deepEqual(ranks, [...ranks].sort());
+  const red = l.body.find((x) => x.action_type === 'redeploy'); assert.ok(red);
+  assert.equal((await w(`/copilot/decisions/${red.id}/action`, 'POST', { action: 'adjust' })).status, 400);
+  const r = await w(`/copilot/decisions/${red.id}/action`, 'POST', { action: 'adjust', params: { n: 1, jours: 15 } }); assert.equal(r.status, 200); assert.match(r.body.resultat, /1 fonctionnaire/);
+  assert.equal((await w(`/copilot/decisions/${red.id}/action`, 'POST', { action: 'approve' })).status, 409); // pas de double exécution
+  const cap = l.body.find((x) => x.action_type === 'convoke_cap'); assert.equal((await w(`/copilot/decisions/${cap.id}/action`, 'POST', { action: 'ignore', note: 'plus tard' })).body.statut, 'ignore');
+  assert.ok(!(await w('/copilot/decisions')).body.some((x) => x.id === cap.id)); // une décision ignorée ne revient pas
+  assert.ok((await w('/copilot/history')).body.length >= 2);
+});
+test('affectation temporaire : retour automatique à l\'échéance', async () => {
+  const cp = require('./copilot'); const row = db.prepare("SELECT * FROM affectations_temporaires WHERE statut='en_cours'").get(); assert.ok(row);
+  assert.notEqual(db.prepare('SELECT service_id s FROM employees WHERE id=?').get(row.employee_id).s, row.service_origine);
+  cp.revertExpired(db, U.addDays(row.date_fin, 1)); assert.equal(db.prepare('SELECT service_id s FROM employees WHERE id=?').get(row.employee_id).s, row.service_origine);
+});
+test('dashboard : formules du cahier des charges (encadrement, avancement, formation)', async () => {
+  const d = (await (await as('drh'))('/dashboard')).body; assert.ok(d.effectifs.encadrement_pct > 0); assert.ok(d.assiduite.par_entite.length > 0);
+  assert.equal(d.carriere.taux_realisation, Math.round((d.carriere.valides / d.carriere.eligibles) * 1000) / 10); assert.ok(d.formules.some((f) => f.id === 'encad'));
+});

@@ -7,6 +7,7 @@ const { hashPassword, checkPassword, tx } = require('./db');
 const U = require('./util');
 const R = require('./rules');
 const { dashboard } = require('./kpi');
+const copilot = require('./copilot');
 const { renderDocument, renderVerify } = require('./documents');
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
@@ -88,6 +89,25 @@ function createApp(db) {
 
   // ---------- Tableau de bord
   route('GET', '/api/dashboard', ['wali', 'drh'], () => dashboard(db));
+
+  // ---------- Copilote décisionnel (règles explicables ; exécution après validation humaine)
+  route('GET', '/api/copilot/decisions', ['wali', 'drh'], () => { copilot.generate(db); return copilot.pending(db); });
+  route('GET', '/api/copilot/history', ['wali', 'drh'], () => q("SELECT d.id,d.titre,d.statut,d.valide_par,d.resultat,d.note,d.decided_at,d.priorite FROM ai_decisions d WHERE d.statut<>'en_attente' ORDER BY d.decided_at DESC LIMIT 30"));
+  route('POST', '/api/copilot/decisions/:id/action', ['wali', 'drh'], (c) => tx(db, () => {
+    const row = one('SELECT * FROM ai_decisions WHERE id=?', Number(c.params.id)); if (!row) throw notFound();
+    if (row.statut !== 'en_attente') throw new HttpError(409, 'Décision déjà traitée');
+    const action = oneOf(c.body.action, ['approve', 'adjust', 'ignore'], 'Action'); const d = { ...row, params: JSON.parse(row.params) };
+    let statut, resultat = null;
+    if (action === 'ignore') { statut = 'ignore'; }
+    else {
+      if (action === 'adjust' && (!c.body.params || typeof c.body.params !== 'object')) throw bad('Paramètres ajustés requis');
+      try { resultat = copilot.execute(db, d, action === 'adjust' ? c.body.params : null, c.user.nom_affichage); } catch (e) { throw e.status ? new HttpError(e.status, e.message) : e; }
+      statut = action === 'adjust' ? 'modifie' : 'approuve';
+    }
+    run('UPDATE ai_decisions SET statut=?, valide_par=?, note=?, resultat=?, decided_at=? WHERE id=?', statut, c.user.nom_affichage, c.body.note ? String(c.body.note).slice(0, 300) : null, resultat, nowIso(), row.id);
+    if (c.user.role === 'wali' && statut !== 'ignore') notifyDrh(`Décision du Wali — ${row.titre} : ${resultat}`, '#/dashboard');
+    return { statut, resultat };
+  }));
 
   // ---------- Fonctionnaires
   route('GET', '/api/employees', ['drh', 'chef'], (c) => {

@@ -1,4 +1,5 @@
 import { h, raw, api, num, pctf, state, actions, MOIS } from './core.js';
+import { mountCopilot } from './copilot.js';
 import { hbar, columns, pyramid, line, meter, legend, dataTable, card, COL } from './charts.js';
 
 const tile = (label, value, { sub = '', freq = '', formula = '', big = false } = {}) => h`<div class="tile ${big ? 'big' : ''}" ${raw(formula ? `title="${formula.replace(/"/g, '&quot;')}"` : '')}><div class="t-label">${label}</div><div class="t-value">${value}</div>${sub ? h`<div class="t-sub">${sub}</div>` : ''}${freq ? h`<div class="t-freq">${freq}</div>` : ''}</div>`;
@@ -21,12 +22,14 @@ export async function dashboard(root) {
     ${tile('Taux de présence', pctf(d.entete.presence_mois), { big: true, sub: `Ce mois · aujourd'hui ${pctf(d.entete.taux_presence_aujourdhui)} (${num(a.absents_aujourdhui)} absents)`, freq: 'Quotidienne' })}
     ${tile('Sessions de formation en cours', h`${num(d.entete.sessions_en_cours)} <small>sessions</small>`, { big: true, sub: `${num(d.entete.inscrits_en_cours)} inscrits`, freq: 'Par session' })}
   </div>
+  <div id="copilot"></div>
   ${alerts.length ? h`<section class="card alerts"><h3>Alertes</h3><ul>${alerts.slice(0, 6).map((x) => h`<li class="al ${x.niveau}"><span aria-hidden="true">${x.niveau === 'critique' ? '✖' : x.niveau === 'alerte' ? '▲' : 'ℹ'}</span> ${x.message} ${x.lien ? h`<a href="${x.lien}">Traiter</a>` : ''}</li>`)}</ul></section>` : ''}
 
   <h2 id="effectifs" class="sec">1. Effectifs & structure</h2>
   <div class="tiles">
     ${tile('Taux de féminisation', pctf(e.feminisation), { sub: `${num(e.femmes)} femmes · ${num(e.hommes)} hommes`, freq: 'Trimestrielle' })}
     ${tile("Part de l'encadrement supérieur", pctf(e.cadres_sup_pct), { sub: `${num(e.cadres_sup)} cadres · dont ${pctf(e.cadres_femmes_pct, 0)} de femmes`, freq: 'Trimestrielle' })}
+    ${tile("Ratio d'encadrement", pctf(e.encadrement_pct), { sub: `${num(e.cadres_ing)} administrateurs et ingénieurs`, freq: 'Trimestrielle', formula: fm('encad') })}
     ${tile('Âge moyen', h`${num(e.age_moyen, 1)} <small>ans</small>`, { sub: `Ancienneté moyenne ${num(e.anciennete_moyenne, 1)} ans`, freq: 'Mensuelle' })}
     ${tile('Départs à la retraite (5 ans)', num(e.retraites[4].cumul), { sub: `dont ${num(e.retraites[0].value)} dans les 12 mois · âge légal ${state.refs.age_retraite} ans`, freq: 'Mensuelle' })}
   </div>
@@ -55,6 +58,7 @@ export async function dashboard(root) {
   </div>
   <div class="grid2">
     ${card("Évolution mensuelle de l'absentéisme", h`${line(a.trend.map((t) => ({ label: MOIS[t.mois - 1], value: t.absenteisme })), { unit: ' %' })}`, { note: 'Journées d’absence non justifiées / jours ouvrés (%)' })}
+    ${card("Absentéisme par entité (30 derniers jours)", h`${hbar(a.par_entite.map((x) => ({ label: x.service, value: x.taux })), { unit: ' %', labelW: 210, valueFmt: (v) => num(v, 1) })}${dataTable(['Entité', 'Effectif', 'Jours d\'absence', 'Taux'], a.par_entite.map((x) => [x.service, x.effectif, x.jours, x.taux + ' %']))}`, { note: 'Jours d\'absence / (effectif × jours ouvrés) — 10 entités les plus touchées' })}
     ${card('Couverture des services — les plus tendus aujourd’hui', h`${hbar(lowCov.map((s) => ({ label: s.service, value: s.taux })), { unit: ' %', max: 100, labelW: 210 })}${dataTable(['Service', 'Effectif', 'Présents', 'Taux'], a.couverture.map((s) => [s.service, s.effectif, s.presents, s.taux + ' %']))}`)}
   </div>
 
@@ -82,7 +86,7 @@ export async function dashboard(root) {
 
   <h2 id="carriere" class="sec">5. Carrière & promotion</h2>
   <div class="tiles">
-    ${tile('Avancements éligibles vs validés', h`${num(ca.valides)} <small>/ ${num(ca.eligibles)}</small>`, { sub: `Taux de réalisation ${pctf(ca.taux_realisation)}`, freq: 'Annuelle' })}
+    ${tile('Avancements éligibles vs validés', h`${num(ca.valides)} <small>/ ${num(ca.eligibles)}</small>`, { sub: `Taux de réalisation ${pctf(ca.taux_realisation)}`, freq: 'Annuelle', formula: fm('avanc') })}
     ${tile('Délai moyen de traitement', h`${num(ca.delai_moyen_jours)} <small>jours</small>`, { sub: 'Instruction d’un dossier d’avancement', freq: 'Mensuelle' })}
     ${tile('Dossiers en attente de décision', num(ca.en_attente), { sub: `${num(ca.rejetes)} rejetés cette année`, freq: 'Temps réel' })}
   </div>
@@ -92,7 +96,7 @@ export async function dashboard(root) {
 
   <h2 id="formation" class="sec">6. Formation continue</h2>
   <div class="tiles">
-    ${tile('Taux de participation', pctf(fo.participation), { sub: `${num(fo.beneficiaires)} fonctionnaires formés en ${d.annee}`, freq: 'Trimestrielle' })}
+    ${tile('Taux de participation', pctf(fo.participation), { sub: `${num(fo.beneficiaires)} fonctionnaires formés en ${d.annee}`, freq: 'Trimestrielle', formula: fm('form') })}
     ${tile('Satisfaction & impact', h`${num(fo.satisfaction, 2)} <small>/ 5</small>`, { sub: `${num(fo.evaluations)} évaluations`, freq: 'Par session' })}
     ${tile('Heures de formation par fonctionnaire', h`${num(fo.heures_par_employe, 1)} <small>h</small>`, { sub: `${num(fo.heures_total)} h suivies au total`, freq: 'Trimestrielle', formula: fm('heures') })}
     ${tile('Sessions', h`${fo.sessions_terminees} <small>terminées</small>`, { sub: `${fo.sessions_en_cours} en cours · ${fo.sessions_planifiees} planifiées`, freq: 'Par session' })}
@@ -108,6 +112,7 @@ export async function dashboard(root) {
 
   <h2 id="formules" class="sec">Formules des indicateurs</h2>
   <section class="card"><table class="t"><thead><tr><th>Indicateur</th><th>Formule</th><th>Précisions</th></tr></thead><tbody>${d.formules.map((f) => h`<tr><td><b>${f.nom}</b></td><td><code>${f.formule}</code></td><td>${f.note}</td></tr>`)}</tbody></table></section>`);
+  mountCopilot(root.querySelector('#copilot'));
 }
 actions.jump = (el) => { document.getElementById(el.dataset.to)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
 actions.print = () => window.print();

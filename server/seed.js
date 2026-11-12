@@ -125,6 +125,11 @@ function seed(db, { today = U.today() } = {}) {
         .run(isWilaya ? `Chef de ${s.div.replace(/^Division (des |du |de l'|de la |d')?/, 'Division ')}` : `Chef de ${/^(Caïdat)/.test(s.nom) ? s.nom : 'Service ' + s.nom}`, isWilaya ? 1 : 0, isWilaya ? 1 : 0, isWilaya ? 1 : 0, isWilaya ? 1 : 0, c.id);
     }
 
+    // Scénario de démonstration : Annexe 3 — plusieurs départs à la retraite proches
+    const hotSvc = db.prepare("SELECT id FROM services WHERE nom='Annexe Administrative 3'").get();
+    const hotEmps = db.prepare("SELECT e.id FROM employees e WHERE e.service_id=? AND e.statut='actif' AND e.id NOT IN (SELECT chef_id FROM services WHERE chef_id IS NOT NULL) ORDER BY e.id LIMIT 3").all(hotSvc.id);
+    hotEmps.forEach((e, i) => { const birth = U.addDays(U.addMonths(today, -63 * 12), 60 + i * 90); const hire = U.addMonths(birth, 25 * 12); db.prepare('UPDATE employees SET date_naissance=?, date_recrutement=?, date_prise_service=?, date_dernier_echelon=?, date_dernier_grade=?, corps=?, echelle=?, grade=?, echelon=10 WHERE id=?').run(birth, hire, hire, U.addMonths(today, -20), U.addMonths(hire, 120), 'Rédacteur', '9', 'Grade principal', e.id); });
+
     // --- Comptes de démonstration
     const insU = db.prepare('INSERT INTO users (username,hash,salt,role,employee_id,nom_affichage) VALUES (?,?,?,?,?,?)');
     const mk = (u, role, emp, nom) => { const h = hashPassword('demo1234'); insU.run(u, h.hash, h.salt, role, emp, nom); };
@@ -154,7 +159,8 @@ function seed(db, { today = U.today() } = {}) {
           insL.run(e.id, type, s, en, j, null, 'valide', 'favorable', dt(U.addDays(s, -ri(7, 25))), dt(U.addDays(s, -ri(2, 6))));
           if (type === 'annuel') used_by[e.id] = (used_by[e.id] || 0) + j;
         }
-        if (rnd() < 0.14 * frac) {
+        const hot = e.service_id === hotSvc.id && m >= Number(today.slice(5, 7)) - 2;
+        if (rnd() < (hot ? 0.6 : 0.14) * frac) {
           const s = nextWork(randDate(from, me > today ? today : me)); const len = ri(1, 4); const en = endAfter(s, len); const j = U.workdays(s, en);
           const type = rnd() < 0.55 ? 'maladie' : 'absence'; const recentAbs = U.diffDays(s, today) < 14;
           let st;
@@ -210,7 +216,7 @@ function seed(db, { today = U.today() } = {}) {
     // convocations à venir (dont l'agent démo)
     const planned = db.prepare("SELECT id FROM trainings WHERE statut='planifiee'").all();
     for (const t of planned) { for (const e of pickEmps(18)) insEn.run(t.id, e.id, 'convoque', null, dt(U.addDays(today, -1))); }
-    insEn.run(planned[0].id, agent.id, 'convoque', null, dt(today));
+    db.prepare("INSERT OR REPLACE INTO enrollments (training_id,employee_id,statut,convoque_at) VALUES (?,?,'convoque',?)").run(planned[0].id, agent.id, dt(today));
 
     // --- Recrutements
     const insR = db.prepare('INSERT INTO recruitments (poste,source,candidat,date_candidature,date_offre,date_acceptation,statut,cout,employee_id) VALUES (?,?,?,?,?,?,?,?,?)');
